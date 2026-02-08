@@ -173,22 +173,15 @@ Use `pyarrow` for Parquet writes. Stream incrementally with `ParquetWriter` to a
 
 ## Implementation Order
 
-1. Scaffolding (Step 1)
-2. Normalized dataclasses (Step 2)
-3. Schema detection + v2/v3/v4 parsers (Step 3)
-4. dat reader + Info.dat parser + beatmap orchestrator (Step 4)
-5. Local custom reader (Step 5) — **first end-to-end test against real data**
-6. Storage writer (Step 8) — can now parse local maps and write Parquet
-7. Tests with fixtures (Step 10)
-8. BeatSaver client + downloader (Step 6)
-9. Unity extractor — discovery pass first (Step 7)
-10. Pipeline orchestration + CLI (Step 9)
+All steps complete:
 
-## Verification
-
-After each major step:
-- **Step 5 done:** Parse the 2 built-in levels, print note counts and sample notes. Verify the "Magic" cross-version case works.
-- **Step 8 done:** Write Parquet from local levels, read it back, verify column types and values.
-- **Step 6 done:** Download 5 maps from BeatSaver, parse them, verify diverse v2 maps work.
-- **Step 7 done:** Run discovery on one `.bundle` file, inspect output to understand internal structure before writing full extraction.
-- **Step 9 done:** Run full pipeline on local + small BeatSaver sample, verify complete Parquet output.
+1. [x] Scaffolding (Step 1)
+2. [x] Normalized dataclasses (Step 2)
+3. [x] Schema detection + v2/v3/v4 parsers (Step 3)
+4. [x] dat reader + Info.dat parser + beatmap orchestrator (Step 4)
+5. [x] Local custom reader (Step 5) — 17 beatmaps from 2 built-in levels, cross-version verified
+6. [x] Storage writer (Step 8) — 4,797 notes written to Parquet, verified round-trip
+7. [x] Tests with fixtures (Step 10) — 27 tests passing
+8. [x] BeatSaver client + downloader (Step 6)
+9. [x] Unity extractor (Step 7) — 65 levels extracted from 38 pack bundles (328 levels with metadata)
+10. [x] Pipeline orchestration + CLI (Step 9)

@@ -25,8 +25,8 @@ def parse_v4_notes(beatmap: dict, bpm: float) -> tuple[list[Note], list[Bomb]]:
     color_notes_data = beatmap.get("colorNotesData", [])
 
     for raw in color_notes:
-        beat = raw["b"]
-        idx = raw["i"]
+        beat = raw.get("b", 0.0)
+        idx = raw.get("i", 0)
         if idx < 0 or idx >= len(color_notes_data):
             continue
         data = color_notes_data[idx]
@@ -34,10 +34,10 @@ def parse_v4_notes(beatmap: dict, bpm: float) -> tuple[list[Note], list[Bomb]]:
         notes.append(Note(
             beat=beat,
             time_seconds=time_seconds,
-            x=data["x"],
-            y=data["y"],
-            color=data["c"],
-            cut_direction=data["d"],
+            x=data.get("x", 0),
+            y=data.get("y", 0),
+            color=data.get("c", 0),
+            cut_direction=data.get("d", 0),
             angle_offset=data.get("a", 0),
         ))
 
@@ -45,8 +45,8 @@ def parse_v4_notes(beatmap: dict, bpm: float) -> tuple[list[Note], list[Bomb]]:
     bomb_notes_data = beatmap.get("bombNotesData", [])
 
     for raw in bomb_notes:
-        beat = raw["b"]
-        idx = raw["i"]
+        beat = raw.get("b", 0.0)
+        idx = raw.get("i", 0)
         if idx < 0 or idx >= len(bomb_notes_data):
             continue
         data = bomb_notes_data[idx]
@@ -54,8 +54,8 @@ def parse_v4_notes(beatmap: dict, bpm: float) -> tuple[list[Note], list[Bomb]]:
         bombs.append(Bomb(
             beat=beat,
             time_seconds=time_seconds,
-            x=data["x"],
-            y=data["y"],
+            x=data.get("x", 0),
+            y=data.get("y", 0),
         ))
 
     notes.sort(key=lambda n: n.beat)
@@ -79,8 +79,8 @@ def parse_v4_obstacles(beatmap: dict, bpm: float) -> list[Obstacle]:
     obstacles_data = beatmap.get("obstaclesData", [])
 
     for raw in obstacle_entries:
-        beat = raw["b"]
-        idx = raw["i"]
+        beat = raw.get("b", 0.0)
+        idx = raw.get("i", 0)
         if idx < 0 or idx >= len(obstacles_data):
             continue
         data = obstacles_data[idx]
@@ -88,10 +88,10 @@ def parse_v4_obstacles(beatmap: dict, bpm: float) -> list[Obstacle]:
         obstacles.append(Obstacle(
             beat=beat,
             time_seconds=time_seconds,
-            duration_beats=data["d"],
-            x=data["x"],
+            duration_beats=data.get("d", 0.0),
+            x=data.get("x", 0),
             y=data.get("y", 0),
-            width=data["w"],
+            width=data.get("w", 1),
             height=data.get("h", 5),
         ))
 
