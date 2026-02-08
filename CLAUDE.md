@@ -6,34 +6,11 @@ An AI-powered mod for Beat Saber that generates custom note maps from audio file
 
 Given an audio file as input, the system generates block positions and orientations (for both left and right sabers) at a regular sample rate (~20 Hz). The goal is a machine learning model that produces playable, enjoyable Beat Saber tracks automatically.
 
-## Key Components
+## Architecture
 
-### 1. Beat Saber Map Format Research
-- Reverse-engineer how the game stores official/purchased song maps
-- Understand the data format for block positions, orientations, timing, and difficulty levels
-- This data becomes the foundation for training data
-
-### 2. Custom Track Loading
-- Figure out how to create custom tracks that load into Beat Saber
-- Support the standard custom map format so generated tracks are playable in-game
-
-### 3. ML Model for Track Generation
-- **Input:** Audio file (waveform, spectrogram features, etc.)
-- **Output:** Sequence of block positions and orientations per timestep
-- **Model type:** TBD
-- **Design options:**
-  - Random seed for repeatable tracks
-  - Randomized generation for a unique experience every play
-
-### 4. Training Data Pipeline
-- **Primary sources:** Official store maps + community-created custom maps
-- **Challenge:** Likely insufficient training data from existing maps alone
-- **Solution:** Use the feedback capture system (below) to generate additional labeled data
-
-### 5. Feedback Capture System (Later Phase)
-- In-game mechanism to collect player feedback on generated tracks
-- Enables continuous improvement of the model through real gameplay data
-- Additional source of training data beyond what's publicly available
+1. **Data Pipeline** (complete) — Extract, parse, normalize Beat Saber maps into Parquet
+2. **ML Model** (complete) — Encoder-decoder transformer for audio → token sequence generation
+3. **Feedback System** (future) — In-game mechanism for player feedback to improve the model
 
 ## Beat Saber Map Format Quick Reference
 
@@ -50,9 +27,9 @@ Maps are **JSON files** in folders. See [LEARNINGS.md](LEARNINGS.md) for full fo
 - **Training data sources:** Custom maps from [BeatSaver](https://beatsaver.com/) (v2 JSON) + 65 official levels (v4 gzip JSON)
 - **Local install:** `C:\Program Files (x86)\Steam\steamapps\common\Beat Saber`
 
-## Data Pipeline (`beat_weaver` package)
+## CLI (`beat-weaver`)
 
-**CLI:** `beat-weaver <command>` (install: `pip install -e .`)
+Install: `pip install -e .` (core) or `pip install -e ".[ml]"` (with ML dependencies)
 
 | Command | Description |
 |---------|-------------|
@@ -60,33 +37,38 @@ Maps are **JSON files** in folders. See [LEARNINGS.md](LEARNINGS.md) for full fo
 | `beat-weaver extract-official` | Extract official maps from Unity bundles |
 | `beat-weaver process` | Normalize raw maps to Parquet |
 | `beat-weaver run` | Full pipeline (all sources) |
+| `beat-weaver train` | Train the ML model |
+| `beat-weaver generate` | Generate a Beat Saber map from audio |
+| `beat-weaver evaluate` | Evaluate model on test data |
 
 **Key modules:**
 - `beat_weaver.parsers.beatmap_parser.parse_map_folder(path)` — parse any map folder
-- `beat_weaver.sources.local_custom` — iterate CustomLevels/
 - `beat_weaver.sources.beatsaver` — BeatSaver API client + downloader
 - `beat_weaver.sources.unity_extractor` — official map extraction
 - `beat_weaver.storage.writer` — Parquet output (notes/bombs/obstacles)
+- `beat_weaver.model.tokenizer` — encode/decode beatmaps ↔ token sequences (291 vocab)
+- `beat_weaver.model.audio` — mel spectrogram extraction, beat-aligned framing
+- `beat_weaver.model.transformer` — AudioEncoder + TokenDecoder + BeatWeaverModel
+- `beat_weaver.model.inference` — autoregressive generation with grammar mask
+- `beat_weaver.model.exporter` — token sequence → playable v2 map folder
+- `beat_weaver.model.evaluate` — onset F1, NPS accuracy, parity, diversity metrics
 
 **Output format:** `data/processed/notes.parquet` with columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset
 
-**Tests:** `python -m pytest tests/ -v` (27 tests)
+**Tests:** `python -m pytest tests/ -v` (106 tests; ML tests skipped without `.[ml]` deps)
 
-## ML Model Design Decisions
+## ML Model
 
-See [LEARNINGS.md](LEARNINGS.md) for full research details.
+See [LEARNINGS.md](LEARNINGS.md) for research details, [plans/002-ml-model.md](plans/002-ml-model.md) for implementation plan.
 
-- **Architecture:** Encoder-decoder transformer (~20-60M params)
-- **Audio input:** Log-mel spectrogram (80 bins, sr=22050, hop=512, ~43 fps), beat-aligned framing
+- **Architecture:** Encoder-decoder transformer (~40M params at default config)
+- **Audio input:** Log-mel spectrogram (80 bins, sr=22050, hop=512), beat-aligned to 1/16th note grid
 - **Scope:** Color notes only (no bombs, walls, arcs, chains until core model performs well)
-- **Output:** Beat-quantized event tokens with compound notes (~290 token vocabulary)
-- **Quantization:** 1/16th note beat subdivisions
-- **Token format:** `[DIFF] [BAR] [POS] [LEFT_TOKEN] [RIGHT_TOKEN] ...`
-- **Sequence length:** ~2,500-4,000 tokens for 3-min Expert map
-- **Difficulty:** Prepended decoder token (`[EASY]` through `[EXPERT_PLUS]`)
-- **Training loss:** Cross-entropy + focal loss for timing + density regression auxiliary
-- **Map export:** v2 format, model output maps 1:1 to v2 JSON fields
-- **Key evaluation:** Onset alignment F1, parity violation rate, NPS accuracy, beat alignment
+- **Output:** Beat-quantized compound tokens (291 vocab) → v2 Beat Saber JSON
+- **Token format:** `START DIFF BAR POS LEFT RIGHT ... BAR ... END`
+- **Training:** Cross-entropy with label smoothing, AdamW + cosine LR, mixed-precision, early stopping
+- **Inference:** Autoregressive with grammar-constrained decoding, temperature/top-k/top-p sampling
+- **Evaluation:** Onset F1, parity violation rate, NPS accuracy, beat alignment, pattern diversity
 
 ## Open Questions
 
