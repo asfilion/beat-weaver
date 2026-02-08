@@ -24,7 +24,7 @@ Maps are **JSON files** in folders. See [LEARNINGS.md](LEARNINGS.md) for full fo
 - **Timing:** All in beats (float). Convert: `seconds = beat * 60.0 / BPM`
 - **Custom maps location:** `<Beat Saber>/Beat Saber_Data/CustomLevels/`
 - **Official maps:** Extracted from Unity bundles via `UnityPy` (328 levels, 65 bundles)
-- **Training data sources:** Custom maps from [BeatSaver](https://beatsaver.com/) (v2 JSON) + 65 official levels (v4 gzip JSON)
+- **Training data sources:** Custom maps from [BeatSaver](https://beatsaver.com/) (v2 JSON, ~55K maps at score>=0.75/upvotes>=5) + 65 official levels (v4 gzip JSON)
 - **Local install:** `C:\Program Files (x86)\Steam\steamapps\common\Beat Saber`
 
 ## CLI (`beat-weaver`)

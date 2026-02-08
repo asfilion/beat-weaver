@@ -9,7 +9,8 @@ from typing import Iterator
 import requests
 
 BASE_URL = "https://api.beatsaver.com"
-DEFAULT_MIN_SCORE = 0.7
+DEFAULT_MIN_SCORE = 0.75
+DEFAULT_MIN_UPVOTES = 5
 DEFAULT_PAGE_SIZE = 20
 REQUEST_DELAY = 1.0  # seconds between API requests
 
@@ -24,10 +25,16 @@ class BeatSaverClient:
     def search_maps(
         self,
         min_score: float = DEFAULT_MIN_SCORE,
-        max_pages: int = 100,
+        min_upvotes: int = DEFAULT_MIN_UPVOTES,
+        max_pages: int = 5000,
         automapper: bool = False,
     ) -> Iterator[dict]:
-        """Paginate through BeatSaver search results, yielding map docs."""
+        """Paginate through BeatSaver search results, yielding map docs.
+
+        Default filters (score >= 0.75, upvotes >= 5, automapper=False)
+        yield ~55,000 maps from ~115,000 total on BeatSaver. See
+        LEARNINGS.md "Training Data Quality Analysis" for rationale.
+        """
         total_found = 0
         page = 0
 
@@ -39,10 +46,18 @@ class BeatSaverClient:
             response.raise_for_status()
             data = response.json()
 
+            below_threshold = 0
             for doc in data.get("docs", []):
+                stats = doc.get("stats", {})
+                score = stats.get("score", 0)
+                upvotes = stats.get("upvotes", 0)
+
                 if doc.get("automapper") != automapper:
                     continue
-                if doc.get("stats", {}).get("score", 0) < min_score:
+                if score < min_score:
+                    below_threshold += 1
+                    continue
+                if upvotes < min_upvotes:
                     continue
                 total_found += 1
                 yield doc
@@ -52,6 +67,16 @@ class BeatSaverClient:
             logger.info(
                 "Fetched page %d, total maps found so far: %d", page, total_found
             )
+
+            # Stop if we've gone past the score threshold (results are
+            # sorted by rating, so once a full page is below min_score
+            # we won't find more matches)
+            if below_threshold >= DEFAULT_PAGE_SIZE:
+                logger.info(
+                    "All maps on page %d below min_score=%.2f, stopping",
+                    page, min_score,
+                )
+                break
 
             if page >= total_pages:
                 break
@@ -94,6 +119,7 @@ class BeatSaverClient:
         self,
         dest_dir: Path,
         min_score: float = DEFAULT_MIN_SCORE,
+        min_upvotes: int = DEFAULT_MIN_UPVOTES,
         max_maps: int = 100,
     ) -> list[Path]:
         """Search and download maps, returning list of extracted directories."""
@@ -103,7 +129,9 @@ class BeatSaverClient:
         downloaded = []
 
         with tqdm(total=max_maps, desc="Downloading maps") as pbar:
-            for map_info in self.search_maps(min_score=min_score):
+            for map_info in self.search_maps(
+                min_score=min_score, min_upvotes=min_upvotes,
+            ):
                 result = self.download_map(map_info, dest_dir)
                 if result is not None:
                     downloaded.append(result)
