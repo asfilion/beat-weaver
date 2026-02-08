@@ -72,17 +72,23 @@ Maps are **JSON files** in folders. See [LEARNINGS.md](LEARNINGS.md) for full fo
 
 **Tests:** `python -m pytest tests/ -v` (27 tests)
 
+## ML Model Design Decisions
+
+See [LEARNINGS.md](LEARNINGS.md) for full research details.
+
+- **Architecture:** Encoder-decoder transformer (~20-60M params)
+- **Audio input:** Log-mel spectrogram (80 bins, sr=22050, hop=512, ~43 fps), beat-aligned framing
+- **Output:** Beat-quantized event tokens with compound notes (~305 token vocabulary)
+- **Quantization:** 1/16th note beat subdivisions
+- **Token format:** `[DIFF] [BAR] [POS] [LEFT_TOKEN] [RIGHT_TOKEN] ...`
+- **Sequence length:** ~2,500-4,000 tokens for 3-min Expert map
+- **Difficulty:** Prepended decoder token (`[EASY]` through `[EXPERT_PLUS]`)
+- **Training loss:** Cross-entropy + focal loss for timing + density regression auxiliary
+- **Map export:** v2 format, model output maps 1:1 to v2 JSON fields
+- **Key evaluation:** Onset alignment F1, parity violation rate, NPS accuracy, beat alignment
+
 ## Open Questions
 
-### Scoring and Labeling Strategy
-- How do we score/evaluate a generated track?
-- How do we label training data effectively?
-- **Windowed evaluation:** Score individual segments of a track rather than the whole track
-  - A single track may have good sequences and bad sequences
-  - Segment-level labeling lets us mark portions as good/bad independently
-  - More granular labels = better training signal
-
-### Model Architecture
-- What features to extract from audio?
-- What model architecture is best suited (sequence-to-sequence, transformer, etc.)?
-- What sample rate / temporal resolution for block placement?
+- **Windowed evaluation:** Score individual segments rather than whole tracks for finer training signal
+- **Feedback capture system:** In-game mechanism to collect player feedback (later phase)
+- **RL fine-tuning:** After supervised pretraining, fine-tune with player feedback reward model

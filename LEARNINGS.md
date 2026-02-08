@@ -38,6 +38,13 @@ This document is the project's curated knowledge base, capturing research findin
 ### Verified Extraction Results
 - [Unity Bundle Internal Structure](#unity-bundle-internal-structure-verified-via-extraction) — Two-location architecture, BPM resolution, extraction stats
 
+### ML Model Research
+- [Audio Feature Extraction](#audio-feature-extraction) — Mel spectrograms, onset detection, librosa parameters
+- [Model Architecture](#model-architecture) — Encoder-decoder transformer, prior automapper architectures
+- [Output Representation](#output-representation) — Beat-quantized event tokens, compound tokens, vocabulary design
+- [Evaluation and Quality Metrics](#evaluation-and-quality-metrics) — Playability heuristics, rhythm alignment, flow, training losses
+- [Map Export](#map-export) — Writing playable v2 custom maps, audio requirements, packaging
+
 ---
 
 ## File Format Overview
@@ -409,3 +416,306 @@ Each level extracted to a standard map folder with synthesized v2-style `Info.da
 - 65 levels extracted successfully (100% success rate)
 - Example "100bills": 12 beatmaps (Standard 5 diffs + OneSaber + NoArrows + 360/90 Degree)
 - v4 format with gzip compression confirmed across all extracted levels
+
+---
+
+## Audio Feature Extraction
+
+### Recommended Parameters
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| Sample rate | 22,050 Hz | Music standard, used by all prior automappers |
+| n_mels | 80 | Whisper / ISMIR 2023 / DeepSaber standard |
+| n_fft | 2048 | Good frequency resolution at 22050 Hz (93ms window) |
+| hop_length | 512 | ~43 frames/sec, sufficient for note placement |
+| Window | Hann | Universal default |
+| Scale | Log-magnitude | Standard for deep learning audio |
+| Input format | Frame-level (not patch) | Better for seq-to-seq generation |
+
+### Primary Feature: Log-Mel Spectrogram
+
+Used by every successful prior system. At default parameters, a 3-minute song produces `(80, ~7,756)` frames. Captures full spectral content in a compact, perceptually-motivated representation.
+
+### Auxiliary Features (Optional)
+
+- **Onset strength envelope** (1 channel) — strong signal for note timing, nearly free to compute
+- **Beat indicator** (1 channel) — binary/soft indicator of beat positions
+- Multi-channel stacking: `[mel_spec (80), onset_strength (1), beat_indicator (1)] = 82 channels`
+
+### What Prior Projects Used
+
+| Project | Audio Features |
+|---------|---------------|
+| DeepSaber | Multi-resolution mel spectrograms (size 80, 100) + MFCCs |
+| Beat Sage | Log-mel spectrogram in temporal windows |
+| InfernoSaber | Deep convolutional autoencoder on raw audio |
+| BeatMapSynthesizer | librosa beat detection + harmonic/percussive separation |
+| Mapperatorinator (osu!) | Whisper encoder on mel spectrogram (80 bins, 16kHz) |
+| ISMIR 2023 paper | 80-bin log-mel, beat-aligned hop size (1/48 beat) |
+
+### Key Finding: Beat Alignment
+
+The ISMIR 2023 paper ([arXiv 2311.13687](https://arxiv.org/abs/2311.13687)) demonstrated that **beat alignment of training data is vital for successful transformer training**. Aligning spectrogram frames to musical beats rather than fixed time windows significantly improves results.
+
+### Feature Relevance Ranking
+
+1. Mel Spectrogram (essential)
+2. Onset Detection (essential for timing)
+3. Beat Tracking (essential for alignment)
+4. Tempogram (useful for tempo-varying content)
+5. Spectral Contrast (moderate — texture changes)
+6. Chroma (moderate — structural awareness)
+7. MFCCs (largely redundant with mel spectrogram)
+
+---
+
+## Model Architecture
+
+### Recommended: Encoder-Decoder Transformer
+
+```
+Audio (wav) → Log-Mel Spectrogram → Beat-Aligned Framing → Transformer Encoder
+                                                                    |
+                                                               [cross-attention]
+                                                                    |
+[DIFFICULTY] [BOS] → Transformer Decoder → Token Sequence → Beat Saber Map
+```
+
+**Encoder:** 6-8 layers, beat-aligned mel spectrogram input (4-8 beat context windows), relative positional encoding. Optionally initialize from pretrained AST weights.
+
+**Decoder:** 6-8 layers, causal self-attention + cross-attention to encoder. Autoregressive token generation.
+
+**Model size:** Start at ~20-60M parameters (similar to MT3 T5-small). Scale up if data permits.
+
+**Training:** Cross-entropy on next-token prediction + auxiliary losses (beat alignment, note density regression).
+
+### Why Encoder-Decoder (Not Decoder-Only)
+
+- Audio understanding benefits from **bidirectional** context (encoder)
+- Note generation is inherently **sequential/causal** (decoder)
+- Cross-attention lets the decoder attend to any part of the audio at every generation step
+- This is what MT3, the ISMIR 2023 paper, and Mapperatorinator all use successfully
+
+### Prior Automapper Architecture Summary
+
+| Project | Year | Architecture | Approach |
+|---------|------|-------------|----------|
+| DeepSaber | 2019 | CNN + Multi-LSTM + beam search | Two-stage: DDC timing → LSTM block selection |
+| Beat Sage | 2020 | Two neural networks | Two-stage: timing from audio → block assignment |
+| InfernoSaber | 2022-25 | Autoencoder + TCN + 2 DNNs | Four-stage pipeline |
+| BeatMapSynthesizer | 2020 | Hidden Markov Models | Statistical (not neural) |
+| BeatLearning | 2024 | Transformer (NanoGPT-style) | Masked encoder + left-to-right decoder |
+| ISMIR 2023 | 2023 | Encoder-decoder Transformer | Beat-aligned spectrogram-to-sequence |
+| Mapperatorinator | 2024 | Whisper-based enc-dec (219M) | Mel spectrogram encoder, event token decoder |
+
+### Two-Stage vs End-to-End
+
+**Two-stage** (DeepSaber, Beat Sage, DDC): Timing model → placement model. Easier to debug, but suffers from error propagation and "repetitive, incoherent local patterns" (DDC finding).
+
+**End-to-end** (ISMIR 2023, BeatLearning, TaikoNation): Single model outputs timing + properties jointly. Better pattern coherence, but harder to train.
+
+**Recommended:** End-to-end transformer with beat-aligned preprocessing. Gets the benefits of joint optimization while encoding musical structure as an inductive bias.
+
+### Difficulty Conditioning
+
+Prepend a difficulty token (`[EASY]` through `[EXPERT_PLUS]`) to the decoder sequence. The transformer learns to condition its entire output distribution via self-attention. Can also add difficulty embedding to encoder frames for stronger conditioning.
+
+### Key References
+
+- [MT3: Music Transcription Transformer](https://github.com/magenta/mt3) — T5 enc-dec, spectrogram → MIDI tokens
+- [Music Transformer](https://openreview.net/pdf?id=rJe4ShAcF7) — Relative self-attention for temporal patterns
+- [AST: Audio Spectrogram Transformer](https://github.com/YuanGongND/ast) — Pretrained audio encoder
+- [Nested Music Transformer](https://arxiv.org/abs/2408.01180) — Compound token sub-decoding
+- [Beat-Aligned Spec2Seq](https://arxiv.org/abs/2311.13687) — Closest to our target architecture
+- [Mapperatorinator](https://github.com/OliBomby/Mapperatorinator) — Whisper-based rhythm game mapper
+- [BeatLearning](https://github.com/sedthh/BeatLearning) — Transformer for rhythm games
+- [EDGE](https://github.com/Stanford-TML/EDGE) — Diffusion + transformer for dance generation
+
+---
+
+## Output Representation
+
+### Recommended: Beat-Quantized Event Tokens with Compound Notes
+
+**Beat quantization:** Snap all note times to 1/16th note subdivisions (4 slots per beat). This aligns with how maps are authored — the BSMG Wiki confirms 90%+ of notes fall on standard subdivisions. Validated as "vital" by the ISMIR 2023 paper.
+
+**Compound tokens with fixed hand slots:** At each active beat position, emit `[LEFT_TOKEN] [RIGHT_TOKEN]` where each is either EMPTY or a compound encoding of `(x, y, direction)`.
+
+### Token Vocabulary (~305 tokens)
+
+| Category | Count | Description |
+|----------|-------|-------------|
+| Position-in-bar | 64 | 1/16th subdivisions in 4/4 time |
+| BAR | 1 | Bar boundary marker |
+| Left hand | 109 | 108 note configs (12 positions × 9 directions) + EMPTY |
+| Right hand | 109 | Same as left hand |
+| Bomb | 13 | 12 grid positions + NO_BOMB |
+| Difficulty | 5 | Easy through ExpertPlus |
+| Special | 4 | START, END, PAD, BAR |
+
+### Sequence Format Example
+
+```
+START DIFF_EXPERT BAR POS_0 LEFT_EMPTY RIGHT_2_1_DOWN POS_4 LEFT_1_1_UP RIGHT_EMPTY BAR POS_0 ...
+```
+
+### Sequence Length Estimates
+
+| Scenario | Tokens |
+|----------|--------|
+| 3-min Expert (2,000 notes, 120 BPM) | ~2,500-4,000 |
+| 3-min Easy (500 notes) | ~800-1,200 |
+| 5-min Expert+ (4,000 notes) | ~5,000-7,000 |
+
+All well within transformer context windows.
+
+### Why This Approach
+
+- **Beat quantization** is empirically validated as critical for transformers in rhythm games
+- **Compound tokens** cut sequence length in half vs factored tokens (Compound Word Transformer: 5-10x faster convergence)
+- **Fixed hand slots** avoid ordering ambiguity of simultaneous events
+- **~305 tokens** is manageable — small embedding table, efficient softmax
+- **Event-based** (no empty frames) avoids the severe sparsity of frame-based approaches
+
+### Alternatives Considered
+
+| Approach | Vocab | Seq Length (3min Expert) | Sparsity | Proven? |
+|----------|-------|------------------------|----------|---------|
+| Frame-based 20 Hz | ~34 outputs/frame | 3,600 | ~40% active | DDC, Beat Sage |
+| Frame-based 50 Hz | ~34 outputs/frame | 9,000 | ~16% active | DDC |
+| Event factored | ~75-225 | 8,000-10,000 | None | Music Transformer |
+| **Event compound (recommended)** | **~305** | **2,500-4,000** | **None** | **Compound Word Transformer** |
+| Beat-quantized factored | ~100-200 | 5,000-7,000 | None | ISMIR 2023 |
+
+---
+
+## Evaluation and Quality Metrics
+
+### During Training
+
+| Loss | Purpose | Notes |
+|------|---------|-------|
+| **Cross-entropy** (primary) | Next-token prediction | Standard for autoregressive transformers |
+| **Focal loss** for timing | Handle class imbalance | γ=2, α tuned to positive class frequency |
+| **Density regression** (auxiliary) | Match NPS to difficulty | Regularize difficulty conditioning |
+| **Beat alignment** (auxiliary) | Penalize off-grid notes | Encourage musical alignment |
+
+**Multi-task weighting:** timing > direction > position > color (suggested 4:2:1:1).
+
+### Post-Generation Quality Score
+
+```
+Quality = w1·Onset_F1 + w2·Beat_Alignment + w3·(1-Parity_Violation_Rate)
+        + w4·(1-Vision_Block_Rate) + w5·Flow_Score + w6·NPS_Accuracy
+        + w7·Pattern_Diversity
+```
+
+### Metric Definitions
+
+**Onset Alignment F1** — Treat notes as predicted onsets, audio onsets as ground truth. TP = note within ±40ms of audio onset. Standard MIR evaluation.
+
+**Beat Alignment Score** — `mean(min_k(|t_note - t_beat_k|))` where `t_beat_k` are beat grid positions. Lower is better.
+
+**Parity Violation Rate** — Track forehand/backhand swing state per hand. Each note implies a swing direction; violations occur when consecutive same-hand notes require the same swing type. Target: <5% for Expert+. Tools: [JoshaParity](https://github.com/Joshabi/JoshaParity), [bs-parity](https://github.com/GalaxyMaster2/bs-parity).
+
+**Vision Block Rate** — Notes at center positions (x=1-2, y=1) that obscure subsequent notes. Target: minimize.
+
+**NPS Accuracy** — `1 - |NPS_generated - NPS_target| / NPS_target`.
+
+**Pattern Diversity** — Fraction of unique 4-note subsequences. Low diversity = repetitive output.
+
+### NPS Ranges by Difficulty
+
+| Difficulty | NPS Range | Rhythm Subdivision |
+|------------|-----------|-------------------|
+| Easy | 1.0 – 2.0 | 1/1 (on-beat) |
+| Normal | 2.0 – 3.5 | 1/2 |
+| Hard | 3.0 – 5.0 | 1/4 |
+| Expert | 4.5 – 7.0 | 1/4, 1/8 |
+| Expert+ | 6.0 – 10.0+ | 1/8, 1/16 |
+
+Official hardest: "Power of the Saber Blade" at 10.66 NPS.
+
+### Playability Heuristics (Algorithmically Detectable)
+
+- **Vision blocks** — notes at (1,1) or (2,1) obscuring subsequent notes
+- **Parity violations** — unnatural forehand/backhand sequences
+- **Double directionals** — consecutive same-direction same-hand notes
+- **Arm crossing** — left hand at x≥2 and right hand at x≤1 simultaneously
+- **Excessive dot notes** — overuse of cut_direction=8 above Normal
+- **Bomb placement** — bombs in natural follow-through swing paths
+
+### Validation Tools
+
+| Tool | What It Checks |
+|------|----------------|
+| [BS Map Check](https://github.com/KivalEvan/BeatSaber-MapCheck) | Schema validity, vision blocks, ranking criteria |
+| [bs-parity](https://github.com/GalaxyMaster2/bs-parity) | Parity errors, swing resets |
+| [JoshaParity](https://github.com/Joshabi/JoshaParity) | Swing prediction, parity analysis |
+| [bs-analysis](https://github.com/officialMECH/bs-analysis) | NPS statistics, difficulty spread |
+
+---
+
+## Map Export
+
+### Target Format: v2
+
+v2 is the oldest supported schema and provides maximum compatibility with Beat Saber, all community tools, BeatSaver uploads, and mods. The game maintains an internal compatibility layer.
+
+### Model Output → v2 JSON (1:1 Mapping)
+
+| Model Output | v2 Field |
+|-------------|----------|
+| `beat` | `_time` |
+| `x` (0-3) | `_lineIndex` |
+| `y` (0-2) | `_lineLayer` |
+| `color` (0-1) | `_type` |
+| `cut_direction` (0-8) | `_cutDirection` |
+
+No transformation needed — direct field rename.
+
+### Required File Structure
+
+```
+CustomLevelFolder/
+  Info.dat              ← must be exactly "Info.dat"
+  song.ogg              ← OGG Vorbis, 44100 Hz, stereo
+  cover.jpg             ← square, 512x512 recommended
+  ExpertStandard.dat    ← one or more difficulty files
+```
+
+### Audio Requirements
+
+- **Format:** OGG Vorbis (`.ogg`)
+- **Sample rate:** 44100 Hz
+- **Channels:** Stereo
+- **Conversion:** `ffmpeg -i input.mp3 -c:a libvorbis -ar 44100 -q:a 6 song.ogg`
+- Add ≥2 seconds silence before first note to avoid hot-start issues
+
+### Custom Map Loading
+
+Beat Saber **natively supports custom levels without mods**. Place folder in:
+- **PC (Steam):** `Beat Saber_Data/CustomLevels/`
+- **Testing:** `Beat Saber_Data/CustomWIPLevels/` (appears in WIP Maps, Practice mode only)
+
+### Map Hash Computation
+
+SHA-1 over concatenation of `Info.dat` bytes + all difficulty `.dat` file bytes (UTF-8). Audio file is NOT included in v2 hash.
+
+### BeatSaver Upload
+
+- **Zip limit:** 15 MB total
+- Files must be at zip root (no containing folder)
+- Cover image required for upload
+- AI-generated maps must be disclosed
+
+### Recommended NJS by Difficulty
+
+| Difficulty | NJS |
+|------------|-----|
+| Easy | 10 |
+| Normal | 10 |
+| Hard | 12 |
+| Expert | 16 |
+| Expert+ | 18 |
