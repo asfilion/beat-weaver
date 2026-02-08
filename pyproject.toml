@@ -19,6 +19,9 @@ dev = [
 [project.scripts]
 beat-weaver = "beat_weaver.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["beat_weaver*"]
+
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
