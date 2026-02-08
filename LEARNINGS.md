@@ -1,4 +1,44 @@
-# Beat Saber Map Format Research
+# Beat Weaver Research Library
+
+This document is the project's curated knowledge base, capturing research findings from each phase of development. It serves as a durable reference for Beat Saber map formats, data sources, extraction techniques, and prior art in automatic map generation. New sections are appended as research progresses — existing content is never removed.
+
+---
+
+## Table of Contents
+
+### Map Format Specification
+- [File Format Overview](#file-format-overview) — Schema versions v2/v3/v4 and their differences
+- [The Note Grid](#the-note-grid) — 4x3 grid coordinate system
+- [Color Values](#color-values) — Red (0) and Blue (1) saber mapping
+- [Cut Direction Values](#cut-direction-values) — Direction integers 0-8
+- [Timing](#timing) — Beat-based timing and BPM conversion
+- [Difficulty Ranks](#difficulty-ranks) — Easy through ExpertPlus rank values
+- [Characteristics](#characteristics) — Standard, OneSaber, NoArrows, 360/90 Degree
+
+### File Structures by Version
+- [v2 Info.dat Structure](#v2-infodat-structure-most-common) — Underscore-prefixed metadata format
+- [v2 Beatmap File Structure](#v2-beatmap-file-structure) — `_notes` and `_obstacles` arrays
+- [v3 Beatmap File Structure](#v3-beatmap-file-structure) — Abbreviated single-letter field names
+- [v4 Beatmap File Structure](#v4-beatmap-file-structure) — Index-based compression with data arrays
+
+### Data Sources and Access
+- [File Locations on Disk (Steam)](#file-locations-on-disk-steam) — Where custom and official maps live
+- [Local Installation Structure](#local-installation-structure) — Detailed Beat Saber directory layout
+- [BeatSaver API](#beatsaver-api) — Community map download endpoints, filtering, rate limits
+- [Unity Asset Extraction](#unity-asset-extraction) — Tools for extracting official maps from bundles
+
+### Implementation Reference
+- [Parsing Strategy](#parsing-strategy) — Step-by-step approach to reading map data
+- [Existing Tools and Libraries](#existing-tools-and-libraries) — Python, TypeScript, and Rust parsers
+- [Key Insight for Training Data](#key-insight-for-training-data) — Custom vs official map accessibility
+
+### Prior Art
+- [Existing ML Automapper Projects](#existing-ml-automapper-projects) — DeepSaber, InfernoSaber, BeatMapSynthesizer, Beat Sage
+
+### Verified Extraction Results
+- [Unity Bundle Internal Structure](#unity-bundle-internal-structure-verified-via-extraction) — Two-location architecture, BPM resolution, extraction stats
+
+---
 
 ## File Format Overview
 
