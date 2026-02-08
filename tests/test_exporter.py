@@ -2,8 +2,10 @@
 
 import json
 
-import numpy as np
 import pytest
+
+np = pytest.importorskip("numpy")
+sf = pytest.importorskip("soundfile")
 
 from beat_weaver.model.exporter import export_map
 from beat_weaver.model.tokenizer import (

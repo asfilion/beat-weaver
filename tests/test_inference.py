@@ -1,7 +1,8 @@
 """Tests for inference and grammar-constrained generation."""
 
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")
 
 from beat_weaver.model.config import ModelConfig
 from beat_weaver.model.inference import _build_grammar_mask, generate

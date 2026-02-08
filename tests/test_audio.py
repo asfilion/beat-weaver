@@ -4,8 +4,11 @@ import json
 import tempfile
 from pathlib import Path
 
-import numpy as np
 import pytest
+
+np = pytest.importorskip("numpy")
+sf = pytest.importorskip("soundfile")
+pytest.importorskip("librosa")
 
 from beat_weaver.model.audio import (
     beat_align_spectrogram,

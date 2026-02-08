@@ -1,7 +1,8 @@
 """Tests for the transformer model architecture."""
 
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")
 
 from beat_weaver.model.config import ModelConfig
 from beat_weaver.model.transformer import (
