@@ -15,7 +15,7 @@ Beat Weaver is a mod/tool for [Beat Saber](https://beatsaber.com/) that uses mac
 
 ## Project Status
 
-Early stage — currently researching Beat Saber map formats and planning the ML pipeline.
+**Data pipeline complete** — can extract, parse, and normalize Beat Saber maps from local custom levels, BeatSaver community maps, and official Unity asset bundles into ML-ready Parquet format. Next phase: ML model design and training.
 
 ## License
 

@@ -37,7 +37,7 @@ Given an audio file as input, the system generates block positions and orientati
 
 ## Beat Saber Map Format Quick Reference
 
-Maps are **JSON files** in folders. See [LEARNINGS.md](LEARNINGS.md) for full format details.
+Maps are **JSON files** in folders. See [LEARNINGS.md](LEARNINGS.md) for full format details. Implementation plans are in [plans/](plans/).
 
 - **Schemas:** v2 (most custom maps), v3, v4 (latest official). All JSON-based, `.dat` extension.
 - **Entry point:** `Info.dat` — song metadata, references difficulty files
