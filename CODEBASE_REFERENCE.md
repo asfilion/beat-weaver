@@ -54,7 +54,8 @@ tests/
 ├── test_model.py                       # Transformer forward/backward tests (9 tests, skipped without [ml])
 ├── test_parsers.py                     # Info/beatmap parser tests (11 tests)
 ├── test_schemas.py                     # Schema & version parsing tests (16 tests)
-└── test_tokenizer.py                   # Tokenizer encode/decode tests (26 tests)
+├── test_tokenizer.py                   # Tokenizer encode/decode tests (26 tests)
+└── test_weighted_sampler.py            # Source weighting tests (9 tests)
 ```
 
 ## Core Dataclasses (`beat_weaver/schemas/normalized.py`)

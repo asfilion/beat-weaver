@@ -55,7 +55,7 @@ Install: `pip install -e .` (core) or `pip install -e ".[ml]"` (with ML dependen
 
 **Output format:** `data/processed/notes.parquet` with columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset
 
-**Tests:** `python -m pytest tests/ -v` (106 tests; ML tests skipped without `.[ml]` deps)
+**Tests:** `python -m pytest tests/ -v` (115 tests; ML tests skipped without `.[ml]` deps)
 
 ## ML Model
 
@@ -66,7 +66,7 @@ See [LEARNINGS.md](LEARNINGS.md) for research details, [plans/002-ml-model.md](p
 - **Scope:** Color notes only (no bombs, walls, arcs, chains until core model performs well)
 - **Output:** Beat-quantized compound tokens (291 vocab) → v2 Beat Saber JSON
 - **Token format:** `START DIFF BAR POS LEFT RIGHT ... BAR ... END`
-- **Training:** Cross-entropy with label smoothing, AdamW + cosine LR, mixed-precision, early stopping
+- **Training:** Cross-entropy with label smoothing, AdamW + cosine LR, mixed-precision, early stopping, weighted sampling (official 20% of batch, custom weighted by score)
 - **Inference:** Autoregressive with grammar-constrained decoding, temperature/top-k/top-p sampling
 - **Evaluation:** Onset F1, parity violation rate, NPS accuracy, beat alignment, pattern diversity
 
