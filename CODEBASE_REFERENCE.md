@@ -1,0 +1,160 @@
+# Codebase Reference
+
+Quick reference for the existing beat_weaver package structure, generated for AI context.
+
+## Directory Tree
+
+```
+beat_weaver/
+├── __init__.py                          # "Beat Weaver - AI-powered Beat Saber track generator."
+├── cli.py                               # Command-line interface (download, extract-official, process, run)
+├── model/                               # ML model package (NEW - being implemented)
+│   ├── __init__.py
+│   ├── audio.py                         # Mel spectrogram extraction + beat-aligned framing
+│   ├── config.py                        # ModelConfig dataclass with all hyperparameters
+│   ├── dataset.py                       # PyTorch Dataset: Parquet + audio → (mel, tokens, mask)
+│   ├── tokenizer.py                     # Token vocabulary (291), encode/decode beatmap ↔ tokens
+│   └── transformer.py                   # AudioEncoder + TokenDecoder + BeatWeaverModel
+├── parsers/
+│   ├── __init__.py
+│   ├── beatmap_parser.py               # Top-level: parse_map_folder(path) → list[NormalizedBeatmap]
+│   ├── dat_reader.py                   # Read .dat files (JSON or gzip)
+│   └── info_parser.py                  # Parse Info.dat metadata
+├── schemas/
+│   ├── __init__.py
+│   ├── detection.py                    # Version detection logic
+│   ├── normalized.py                   # Unified data schema (dataclasses) ← KEY FILE
+│   ├── v2.py                           # v2-specific parsers
+│   ├── v3.py                           # v3-specific parsers
+│   └── v4.py                           # v4-specific parsers
+├── pipeline/
+│   ├── __init__.py
+│   ├── batch.py                        # Full pipeline orchestration (PipelineConfig, run_pipeline)
+│   ├── cache.py                        # Processing cache
+│   └── processor.py                    # Individual map processing
+├── sources/
+│   ├── __init__.py
+│   ├── beatsaver.py                    # BeatSaver API client + downloader
+│   ├── local_custom.py                 # Local CustomLevels iteration
+│   └── unity_extractor.py             # Official maps from Unity bundles
+└── storage/
+    ├── __init__.py
+    └── writer.py                       # Parquet output (notes/bombs/obstacles) + JSON metadata
+
+tests/
+├── __init__.py
+├── test_schemas.py                     # Schema & version parsing tests (16 tests)
+├── test_parsers.py                     # Info/beatmap parser tests (11 tests)
+└── test_tokenizer.py                   # Tokenizer encode/decode tests (NEW)
+```
+
+## Core Dataclasses (`beat_weaver/schemas/normalized.py`)
+
+```python
+@dataclass
+class Note:
+    beat: float
+    time_seconds: float       # beat * 60.0 / bpm
+    x: int                    # column 0-3
+    y: int                    # row 0-2
+    color: int                # 0=Red/Left, 1=Blue/Right
+    cut_direction: int        # 0=Up,1=Down,2=Left,3=Right,4=UL,5=UR,6=DL,7=DR,8=Any
+    angle_offset: int = 0
+
+@dataclass
+class Bomb:
+    beat: float
+    time_seconds: float
+    x: int
+    y: int
+
+@dataclass
+class Obstacle:
+    beat: float
+    time_seconds: float
+    duration_beats: float
+    x: int
+    y: int
+    width: int
+    height: int
+
+@dataclass
+class DifficultyInfo:
+    characteristic: str       # "Standard", "OneSaber", "NoArrows", "360Degree", "90Degree"
+    difficulty: str           # "Easy", "Normal", "Hard", "Expert", "ExpertPlus"
+    difficulty_rank: int      # 1, 3, 5, 7, 9
+    note_jump_speed: float
+    note_jump_offset: float
+    note_count: int = 0
+    bomb_count: int = 0
+    obstacle_count: int = 0
+    nps: float | None = None
+
+@dataclass
+class SongMetadata:
+    source: str               # "beatsaver", "local_custom", "official"
+    source_id: str
+    hash: str = ""
+    song_name: str = ""
+    song_sub_name: str = ""
+    song_author: str = ""
+    mapper_name: str = ""
+    bpm: float = 0.0
+    song_duration_seconds: float | None = None
+    upvotes: int | None = None
+    downvotes: int | None = None
+    score: float | None = None
+
+@dataclass
+class NormalizedBeatmap:
+    metadata: SongMetadata
+    difficulty_info: DifficultyInfo
+    notes: list[Note] = field(default_factory=list)
+    bombs: list[Bomb] = field(default_factory=list)
+    obstacles: list[Obstacle] = field(default_factory=list)
+```
+
+## CLI Entry Points (`beat_weaver/cli.py`)
+
+- `beat-weaver download` — Download custom maps from BeatSaver API
+- `beat-weaver extract-official` — Extract official maps from Unity bundles
+- `beat-weaver process` — Normalize raw maps to Parquet
+- `beat-weaver run` — Full pipeline (all sources)
+
+Entry point: `beat-weaver = "beat_weaver.cli:main"` (pyproject.toml)
+
+## pyproject.toml
+
+```toml
+[project]
+name = "beat-weaver"
+version = "0.1.0"
+description = "AI-powered Beat Saber track generator"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "UnityPy>=1.10",
+    "pyarrow>=15.0",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+
+[project.scripts]
+beat-weaver = "beat_weaver.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["beat_weaver*"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+```
+
+## Output Format (Parquet)
+
+- `data/processed/notes.parquet` — columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset
+- `data/processed/bombs.parquet` — bombs with position data
+- `data/processed/obstacles.parquet` — walls with duration/dimensions
+- `data/processed/metadata.json` — Song-level metadata keyed by hash

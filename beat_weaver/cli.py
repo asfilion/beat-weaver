@@ -50,6 +50,119 @@ def cmd_process(args: argparse.Namespace) -> None:
     print(f"Processed {len(all_beatmaps)} beatmaps to {output_dir}")
 
 
+def cmd_train(args: argparse.Namespace) -> None:
+    from beat_weaver.model.audio import build_audio_manifest, save_manifest, load_manifest
+    from beat_weaver.model.config import ModelConfig
+    from beat_weaver.model.dataset import BeatSaberDataset
+    from beat_weaver.model.training import train
+
+    config = ModelConfig()
+    if args.config:
+        config = ModelConfig.load(Path(args.config))
+    if args.epochs:
+        config.max_epochs = args.epochs
+    if args.batch_size:
+        config.batch_size = args.batch_size
+
+    manifest_path = Path(args.audio_manifest)
+    if not manifest_path.exists():
+        print(f"Audio manifest not found: {manifest_path}")
+        return
+
+    data_dir = Path(args.data)
+    train_ds = BeatSaberDataset(data_dir, manifest_path, config, split="train")
+    val_ds = BeatSaberDataset(data_dir, manifest_path, config, split="val")
+
+    print(f"Training: {len(train_ds)} samples, Validation: {len(val_ds)} samples")
+
+    resume = Path(args.resume) if args.resume else None
+    best_ckpt = train(config, train_ds, val_ds, Path(args.output), resume_from=resume)
+    print(f"Training complete. Best checkpoint: {best_ckpt}")
+
+
+def cmd_generate(args: argparse.Namespace) -> None:
+    import torch
+    from beat_weaver.model.audio import compute_mel_spectrogram, load_audio
+    from beat_weaver.model.config import ModelConfig
+    from beat_weaver.model.exporter import export_map
+    from beat_weaver.model.inference import generate
+    from beat_weaver.model.transformer import BeatWeaverModel
+
+    ckpt_dir = Path(args.checkpoint)
+    config = ModelConfig.load(ckpt_dir / "config.json")
+
+    model = BeatWeaverModel(config)
+    model.load_state_dict(
+        torch.load(ckpt_dir / "model.pt", map_location="cpu", weights_only=True),
+    )
+    model.eval()
+
+    audio, sr = load_audio(Path(args.audio), sr=config.sample_rate)
+    mel = compute_mel_spectrogram(audio, sr=sr, n_mels=config.n_mels,
+                                  n_fft=config.n_fft, hop_length=config.hop_length)
+    mel_tensor = torch.from_numpy(mel)
+
+    tokens = generate(
+        model, mel_tensor, args.difficulty, config,
+        temperature=args.temperature,
+        seed=args.seed,
+    )
+
+    song_name = Path(args.audio).stem
+    output = Path(args.output) if args.output else Path(f"output/{song_name}")
+    export_map(tokens, args.bpm, song_name, Path(args.audio), output, args.difficulty)
+    print(f"Generated map: {output}")
+
+
+def cmd_evaluate(args: argparse.Namespace) -> None:
+    import json as _json
+    import torch
+    from beat_weaver.model.audio import (
+        compute_mel_spectrogram, load_audio, load_manifest, beat_align_spectrogram,
+    )
+    from beat_weaver.model.config import ModelConfig
+    from beat_weaver.model.dataset import BeatSaberDataset
+    from beat_weaver.model.evaluate import evaluate_map
+    from beat_weaver.model.inference import generate
+    from beat_weaver.model.tokenizer import decode_tokens
+    from beat_weaver.model.transformer import BeatWeaverModel
+
+    ckpt_dir = Path(args.checkpoint)
+    config = ModelConfig.load(ckpt_dir / "config.json")
+
+    model = BeatWeaverModel(config)
+    model.load_state_dict(
+        torch.load(ckpt_dir / "model.pt", map_location="cpu", weights_only=True),
+    )
+    model.eval()
+
+    test_ds = BeatSaberDataset(Path(args.data), Path(args.audio_manifest), config, split="test")
+    results = []
+
+    for i in range(len(test_ds)):
+        mel, tokens, mask = test_ds[i]
+        sample = test_ds.samples[i]
+
+        gen_tokens = generate(model, mel, sample["difficulty"], config, temperature=0)
+        gen_notes = decode_tokens(gen_tokens, sample["bpm"])
+
+        from beat_weaver.schemas.normalized import Note
+        ref_notes = [
+            Note(beat=n["beat"], time_seconds=n["time_seconds"],
+                 x=n["x"], y=n["y"], color=n["color"], cut_direction=n["cut_direction"])
+            for n in sample["notes"]
+        ]
+
+        metrics = evaluate_map(gen_notes, ref_notes, sample["bpm"])
+        metrics["song_hash"] = sample["song_hash"]
+        metrics["difficulty"] = sample["difficulty"]
+        results.append(metrics)
+
+    output_path = Path(args.output) if args.output else Path("evaluation_results.json")
+    output_path.write_text(_json.dumps(results, indent=2))
+    print(f"Evaluated {len(results)} maps. Results: {output_path}")
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     from beat_weaver.pipeline.batch import PipelineConfig, run_pipeline
 
@@ -112,6 +225,34 @@ def main() -> None:
     run.add_argument("--no-beatsaver", action="store_true")
     run.add_argument("--no-official", action="store_true")
 
+    # train
+    tr = sub.add_parser("train", help="Train the ML model")
+    tr.add_argument("--data", default="data/processed", help="Processed data directory")
+    tr.add_argument("--audio-manifest", required=True, help="Audio manifest JSON path")
+    tr.add_argument("--output", default="output/training", help="Output directory for checkpoints")
+    tr.add_argument("--config", default=None, help="Optional JSON config override")
+    tr.add_argument("--epochs", type=int, default=None, help="Max epochs")
+    tr.add_argument("--batch-size", type=int, default=None, help="Batch size")
+    tr.add_argument("--resume", default=None, help="Resume from checkpoint directory")
+
+    # generate
+    gen = sub.add_parser("generate", help="Generate a Beat Saber map from audio")
+    gen.add_argument("--checkpoint", required=True, help="Model checkpoint directory")
+    gen.add_argument("--audio", required=True, help="Input audio file")
+    gen.add_argument("--difficulty", default="Expert",
+                     choices=["Easy", "Normal", "Hard", "Expert", "ExpertPlus"])
+    gen.add_argument("--output", default=None, help="Output map folder")
+    gen.add_argument("--bpm", type=float, required=True, help="Song BPM")
+    gen.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature")
+    gen.add_argument("--seed", type=int, default=None, help="Random seed")
+
+    # evaluate
+    ev = sub.add_parser("evaluate", help="Evaluate model on test data")
+    ev.add_argument("--checkpoint", required=True, help="Model checkpoint directory")
+    ev.add_argument("--data", default="data/processed", help="Test data directory")
+    ev.add_argument("--audio-manifest", required=True, help="Audio manifest JSON path")
+    ev.add_argument("--output", default=None, help="Output JSON path for results")
+
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -123,6 +264,9 @@ def main() -> None:
         "extract-official": cmd_extract_official,
         "process": cmd_process,
         "run": cmd_run,
+        "train": cmd_train,
+        "generate": cmd_generate,
+        "evaluate": cmd_evaluate,
     }
 
     handler = commands.get(args.command)

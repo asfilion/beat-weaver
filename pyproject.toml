@@ -11,6 +11,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ml = [
+    "torch>=2.2",
+    "torchaudio>=2.2",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "tensorboard>=2.16",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",

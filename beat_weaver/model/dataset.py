@@ -1,0 +1,222 @@
+"""PyTorch Dataset for Beat Saber map training.
+
+Produces (mel_spectrogram, token_ids, token_mask) tuples from Parquet data + audio.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from pathlib import Path
+
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+
+from beat_weaver.model.audio import (
+    beat_align_spectrogram,
+    compute_mel_spectrogram,
+    load_audio,
+    load_manifest,
+)
+from beat_weaver.model.config import ModelConfig
+from beat_weaver.model.tokenizer import encode_beatmap
+from beat_weaver.schemas.normalized import (
+    DifficultyInfo,
+    Note,
+    NormalizedBeatmap,
+    SongMetadata,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _split_hashes(
+    hashes: list[str], split: str, seed: int = 42,
+) -> list[str]:
+    """Deterministically split song hashes into train/val/test (80/10/10)."""
+    rng = np.random.RandomState(seed)
+    indices = rng.permutation(len(hashes))
+    n_val = max(1, len(hashes) // 10)
+    n_test = max(1, len(hashes) // 10)
+
+    if split == "train":
+        return [hashes[i] for i in indices[: len(hashes) - n_val - n_test]]
+    elif split == "val":
+        return [hashes[i] for i in indices[len(hashes) - n_val - n_test : len(hashes) - n_test]]
+    elif split == "test":
+        return [hashes[i] for i in indices[len(hashes) - n_test :]]
+    else:
+        raise ValueError(f"Unknown split: {split!r}")
+
+
+class BeatSaberDataset(Dataset):
+    """Dataset that loads Parquet note data + audio for training.
+
+    Each item is one (song_hash, difficulty, characteristic) combination.
+    Returns (mel_spectrogram, token_ids, token_mask) tensors.
+    """
+
+    def __init__(
+        self,
+        processed_dir: Path,
+        audio_manifest_path: Path,
+        config: ModelConfig,
+        split: str = "train",
+    ) -> None:
+        self.config = config
+        self.processed_dir = Path(processed_dir)
+        self.audio_manifest = load_manifest(audio_manifest_path)
+
+        # Load metadata
+        meta_path = self.processed_dir / "metadata.json"
+        with open(meta_path) as f:
+            self.metadata: dict[str, dict] = json.load(f)
+
+        # Load notes from Parquet
+        import pyarrow.parquet as pq
+
+        notes_path = self.processed_dir / "notes.parquet"
+        self.notes_table = pq.read_table(notes_path)
+        notes_df = self.notes_table.to_pydict()
+
+        # Group notes by (song_hash, difficulty, characteristic)
+        self.samples: list[dict] = []
+        groups: dict[tuple[str, str, str], list[dict]] = {}
+
+        for i in range(len(notes_df["song_hash"])):
+            key = (
+                notes_df["song_hash"][i],
+                notes_df["difficulty"][i],
+                notes_df["characteristic"][i],
+            )
+            if key not in groups:
+                groups[key] = []
+            groups[key].append({
+                "beat": notes_df["beat"][i],
+                "time_seconds": notes_df["time_seconds"][i],
+                "x": notes_df["x"][i],
+                "y": notes_df["y"][i],
+                "color": notes_df["color"][i],
+                "cut_direction": notes_df["cut_direction"][i],
+                "angle_offset": notes_df.get("angle_offset", [0] * len(notes_df["beat"]))[i],
+                "bpm": notes_df["bpm"][i],
+            })
+
+        # Filter by split (split by song_hash)
+        all_hashes = sorted({k[0] for k in groups})
+        split_hashes = set(_split_hashes(all_hashes, split))
+
+        for (song_hash, difficulty, characteristic), note_dicts in groups.items():
+            if song_hash not in split_hashes:
+                continue
+            if song_hash not in self.audio_manifest:
+                continue
+            self.samples.append({
+                "song_hash": song_hash,
+                "difficulty": difficulty,
+                "characteristic": characteristic,
+                "notes": note_dicts,
+                "bpm": note_dicts[0]["bpm"],
+            })
+
+        logger.info(
+            "BeatSaberDataset(%s): %d samples from %d songs",
+            split, len(self.samples), len(split_hashes),
+        )
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        sample = self.samples[idx]
+        song_hash = sample["song_hash"]
+        bpm = sample["bpm"]
+
+        # Reconstruct NormalizedBeatmap
+        notes = [
+            Note(
+                beat=n["beat"],
+                time_seconds=n["time_seconds"],
+                x=n["x"],
+                y=n["y"],
+                color=n["color"],
+                cut_direction=n["cut_direction"],
+                angle_offset=n.get("angle_offset", 0),
+            )
+            for n in sample["notes"]
+        ]
+
+        meta = self.metadata.get(song_hash, {})
+        beatmap = NormalizedBeatmap(
+            metadata=SongMetadata(
+                source=meta.get("source", "unknown"),
+                source_id=meta.get("source_id", song_hash),
+                hash=song_hash,
+                bpm=bpm,
+            ),
+            difficulty_info=DifficultyInfo(
+                characteristic=sample["characteristic"],
+                difficulty=sample["difficulty"],
+                difficulty_rank=0,
+                note_jump_speed=0.0,
+                note_jump_offset=0.0,
+            ),
+            notes=notes,
+        )
+
+        # Tokenize
+        token_ids = encode_beatmap(beatmap)
+
+        # Truncate or pad tokens
+        max_len = self.config.max_seq_len
+        if len(token_ids) > max_len:
+            token_ids = token_ids[:max_len]
+        mask = [True] * len(token_ids) + [False] * (max_len - len(token_ids))
+        token_ids = token_ids + [0] * (max_len - len(token_ids))
+
+        # Load and process audio
+        audio_path = self.audio_manifest[song_hash]
+        audio, sr = load_audio(Path(audio_path), sr=self.config.sample_rate)
+        mel = compute_mel_spectrogram(
+            audio, sr=sr,
+            n_mels=self.config.n_mels,
+            n_fft=self.config.n_fft,
+            hop_length=self.config.hop_length,
+        )
+        mel = beat_align_spectrogram(
+            mel, sr=sr, hop_length=self.config.hop_length, bpm=bpm,
+        )
+
+        return (
+            torch.from_numpy(mel),                          # (n_mels, T_audio)
+            torch.tensor(token_ids, dtype=torch.long),      # (max_seq_len,)
+            torch.tensor(mask, dtype=torch.bool),           # (max_seq_len,)
+        )
+
+
+def collate_fn(
+    batch: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Collate batch, padding mel spectrograms to the longest in the batch.
+
+    Returns (mel, mel_mask, tokens, token_mask).
+    """
+    mels, tokens, masks = zip(*batch)
+
+    # Pad mel spectrograms to max length in batch
+    max_mel_len = max(m.shape[1] for m in mels)
+    n_mels = mels[0].shape[0]
+
+    mel_padded = torch.zeros(len(mels), n_mels, max_mel_len)
+    mel_mask = torch.zeros(len(mels), max_mel_len, dtype=torch.bool)
+    for i, m in enumerate(mels):
+        length = m.shape[1]
+        mel_padded[i, :, :length] = m
+        mel_mask[i, :length] = True
+
+    tokens_stacked = torch.stack(tokens)
+    masks_stacked = torch.stack(masks)
+
+    return mel_padded, mel_mask, tokens_stacked, masks_stacked
