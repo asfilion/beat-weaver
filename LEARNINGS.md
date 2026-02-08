@@ -401,7 +401,10 @@ Official maps are stored across two locations:
    - Contain:
      - `MonoBehaviour` ("BeatmapLevelDataSO") mapping characteristics+difficulties to `TextAsset` path IDs
      - Gzipped `TextAsset` files: `<Name><Diff>.beatmap.gz` (v4 JSON), `<Name>.audio.gz` (BPM/sample data), `<Name>.lightshow.gz`
-     - `AudioClip` (song audio as resource reference)
+     - `AudioClip` (song audio) — extractable via `obj.parse_as_object().samples` → `{filename: bytes}` WAV data
+
+### AudioClip Extraction
+UnityPy can decode AudioClip assets directly. `clip.samples` returns a dict of `{filename: bytes}` containing decoded WAV audio. All 65 level bundles contain an AudioClip asset. Total extracted audio: ~2 GB WAV. Audio is written as `song.wav` alongside the beatmap files, and `_songFilename` is set in the synthesized `Info.dat`.
 
 ### Level ID Matching
 Pack metadata uses `_levelID` (e.g., "100Bills"), level bundles use filename (e.g., "100bills"). Match is case-insensitive.

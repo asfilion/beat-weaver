@@ -23,8 +23,8 @@ Maps are **JSON files** in folders. See [LEARNINGS.md](LEARNINGS.md) for full fo
 - **Cut directions:** 0=Up, 1=Down, 2=Left, 3=Right, 4=UpLeft, 5=UpRight, 6=DownLeft, 7=DownRight, 8=Any
 - **Timing:** All in beats (float). Convert: `seconds = beat * 60.0 / BPM`
 - **Custom maps location:** `<Beat Saber>/Beat Saber_Data/CustomLevels/`
-- **Official maps:** Extracted from Unity bundles via `UnityPy` (328 levels, 65 bundles)
-- **Training data sources:** Custom maps from [BeatSaver](https://beatsaver.com/) (v2 JSON, ~55K maps at score>=0.75/upvotes>=5) + 65 official levels (v4 gzip JSON)
+- **Official maps:** Extracted from Unity bundles via `UnityPy` (328 levels, 65 bundles) — includes audio (WAV via AudioClip extraction)
+- **Training data sources:** Custom maps from [BeatSaver](https://beatsaver.com/) (v2 JSON, ~55K maps at score>=0.75/upvotes>=5) + 65 official levels (v4 gzip JSON + WAV audio)
 - **Local install:** `C:\Program Files (x86)\Steam\steamapps\common\Beat Saber`
 
 ## CLI (`beat-weaver`)
@@ -44,7 +44,7 @@ Install: `pip install -e .` (core) or `pip install -e ".[ml]"` (with ML dependen
 **Key modules:**
 - `beat_weaver.parsers.beatmap_parser.parse_map_folder(path)` — parse any map folder
 - `beat_weaver.sources.beatsaver` — BeatSaver API client + downloader
-- `beat_weaver.sources.unity_extractor` — official map extraction
+- `beat_weaver.sources.unity_extractor` — official map + audio extraction from Unity bundles
 - `beat_weaver.storage.writer` — Parquet output (notes/bombs/obstacles)
 - `beat_weaver.model.tokenizer` — encode/decode beatmaps ↔ token sequences (291 vocab)
 - `beat_weaver.model.audio` — mel spectrogram extraction, beat-aligned framing
