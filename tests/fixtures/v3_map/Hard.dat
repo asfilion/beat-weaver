@@ -1,0 +1,23 @@
+{
+  "version": "3.0.0",
+  "colorNotes": [
+    {"b": 4.0, "x": 1, "y": 0, "c": 0, "d": 1, "a": 0},
+    {"b": 4.0, "x": 2, "y": 0, "c": 1, "d": 1, "a": 0},
+    {"b": 8.0, "x": 0, "y": 2, "c": 0, "d": 0, "a": 15},
+    {"b": 8.0, "x": 3, "y": 2, "c": 1, "d": 0, "a": -15}
+  ],
+  "bombNotes": [
+    {"b": 6.0, "x": 1, "y": 1},
+    {"b": 6.0, "x": 2, "y": 1}
+  ],
+  "obstacles": [
+    {"b": 10.0, "x": 0, "y": 0, "d": 2.0, "w": 1, "h": 3}
+  ],
+  "sliders": [],
+  "burstSliders": [],
+  "bpmEvents": [],
+  "rotationEvents": [],
+  "basicBeatmapEvents": [],
+  "colorBoostBeatmapEvents": [],
+  "customData": {}
+}

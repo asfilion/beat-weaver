@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c:*)",
+      "Bash(set \"PATH=%PATH%;C:\\\\Users\\\\adamf\\\\AppData\\\\Local\\\\Microsoft\\\\WinGet\\\\Links\")",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(export PATH:*)",
+      "Bash(python:*)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git filter-repo:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)",
+      "WebSearch",
+      "WebFetch(domain:bsmg.wiki)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.rs)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(strings:*)",
+      "Bash(head:*)",
+      "Bash(wc:*)",
+      "Bash(cat:*)",
+      "WebFetch(domain:api.beatsaver.com)",
+      "Bash(hexdump:*)",
+      "Bash(od:*)",
+      "WebFetch(domain:docs.beatsaver.com)",
+      "WebFetch(domain:thume.ca)",
+      "Bash(sort:*)"
+    ]
+  }
+}

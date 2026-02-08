@@ -336,3 +336,36 @@ Located in `Beat Saber_Data/StreamingAssets/aa/StandaloneWindows64/`:
 - **Website:** [beatsage.com](https://beatsage.com/)
 - **Model:** Two neural networks: timing network (spectrogram → block placement) + block assignment network (timestamp → note properties)
 - **Data:** Curated official + community maps (not open-sourced)
+
+---
+
+## Unity Bundle Internal Structure (Verified via Extraction)
+
+### Two-Location Architecture
+Official maps are stored across two locations:
+
+1. **Pack bundles** (`StandaloneWindows64/<pack>_pack_assets_all_*.bundle`):
+   - 38 pack bundles total (OST volumes + DLC packs)
+   - Contain `MonoBehaviour` objects with song metadata per level: `_levelID`, `_songName`, `_songAuthorName`, `_beatsPerMinute`, `_songDuration`, difficulty preview info with NJS/NJO
+   - 328 levels with metadata extracted across all packs
+
+2. **Level data bundles** (`BeatmapLevelsData/<levelID>` — no file extension):
+   - 65 UnityFS bundles, one per level
+   - Contain:
+     - `MonoBehaviour` ("BeatmapLevelDataSO") mapping characteristics+difficulties to `TextAsset` path IDs
+     - Gzipped `TextAsset` files: `<Name><Diff>.beatmap.gz` (v4 JSON), `<Name>.audio.gz` (BPM/sample data), `<Name>.lightshow.gz`
+     - `AudioClip` (song audio as resource reference)
+
+### Level ID Matching
+Pack metadata uses `_levelID` (e.g., "100Bills"), level bundles use filename (e.g., "100bills"). Match is case-insensitive.
+
+### BPM Resolution
+Pack metadata `_beatsPerMinute` is authoritative. Fallback: derive from `audio.gz`'s `bpmData` array using `last_entry.eb / (last_entry.ei / songFrequency) * 60`.
+
+### Extraction Output
+Each level extracted to a standard map folder with synthesized v2-style `Info.dat` + gzip-compressed v4 `.dat` files. The existing `parse_map_folder()` + `dat_reader` (auto-gzip) handles these seamlessly.
+
+### Verified Stats
+- 65 levels extracted successfully (100% success rate)
+- Example "100bills": 12 beatmaps (Standard 5 diffs + OneSaber + NoArrows + 360/90 Degree)
+- v4 format with gzip compression confirmed across all extracted levels

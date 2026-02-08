@@ -46,9 +46,31 @@ Maps are **JSON files** in folders. See [LEARNINGS.md](LEARNINGS.md) for full fo
 - **Cut directions:** 0=Up, 1=Down, 2=Left, 3=Right, 4=UpLeft, 5=UpRight, 6=DownLeft, 7=DownRight, 8=Any
 - **Timing:** All in beats (float). Convert: `seconds = beat * 60.0 / BPM`
 - **Custom maps location:** `<Beat Saber>/Beat Saber_Data/CustomLevels/`
-- **Official maps:** Locked in Unity asset bundles (not plain files)
-- **Training data source:** Custom maps from [BeatSaver](https://beatsaver.com/) (v2 JSON, freely available)
+- **Official maps:** Extracted from Unity bundles via `UnityPy` (328 levels, 65 bundles)
+- **Training data sources:** Custom maps from [BeatSaver](https://beatsaver.com/) (v2 JSON) + 65 official levels (v4 gzip JSON)
 - **Local install:** `C:\Program Files (x86)\Steam\steamapps\common\Beat Saber`
+
+## Data Pipeline (`beat_weaver` package)
+
+**CLI:** `beat-weaver <command>` (install: `pip install -e .`)
+
+| Command | Description |
+|---------|-------------|
+| `beat-weaver download` | Download custom maps from BeatSaver API |
+| `beat-weaver extract-official` | Extract official maps from Unity bundles |
+| `beat-weaver process` | Normalize raw maps to Parquet |
+| `beat-weaver run` | Full pipeline (all sources) |
+
+**Key modules:**
+- `beat_weaver.parsers.beatmap_parser.parse_map_folder(path)` — parse any map folder
+- `beat_weaver.sources.local_custom` — iterate CustomLevels/
+- `beat_weaver.sources.beatsaver` — BeatSaver API client + downloader
+- `beat_weaver.sources.unity_extractor` — official map extraction
+- `beat_weaver.storage.writer` — Parquet output (notes/bombs/obstacles)
+
+**Output format:** `data/processed/notes.parquet` with columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset
+
+**Tests:** `python -m pytest tests/ -v` (27 tests)
 
 ## Open Questions
 
