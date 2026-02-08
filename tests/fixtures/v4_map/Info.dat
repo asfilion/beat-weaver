@@ -1,0 +1,32 @@
+{
+  "version": "4.0.0",
+  "song": {
+    "title": "Test Song V4",
+    "subTitle": "",
+    "author": "Test Artist V4"
+  },
+  "audio": {
+    "songFilename": "song.ogg",
+    "songDuration": 180.0,
+    "bpm": 150.0,
+    "lufs": -8.0,
+    "previewStartTime": 30.0,
+    "previewDuration": 10.0
+  },
+  "coverImageFilename": "cover.jpg",
+  "environmentNames": ["DefaultEnvironment"],
+  "difficultyBeatmaps": [
+    {
+      "characteristic": "Standard",
+      "difficulty": "ExpertPlus",
+      "beatmapAuthors": {
+        "mappers": ["TestMapperV4"],
+        "lighters": []
+      },
+      "environmentNameIdx": 0,
+      "noteJumpMovementSpeed": 18.0,
+      "noteJumpStartBeatOffset": 0.5,
+      "beatmapDataFilename": "ExpertPlus.dat"
+    }
+  ]
+}
