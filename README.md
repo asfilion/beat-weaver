@@ -1,3 +1,5 @@
+[![CI](https://github.com/asfilion/beat-weaver/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/asfilion/beat-weaver/actions/workflows/ci.yml)
+
 # beat-weaver
 
 AI-powered Beat Saber track generator — feed in a song, get a playable custom map.
