@@ -230,3 +230,109 @@ Multiple objects can reference the same metadata index for deduplication.
 ## Key Insight for Training Data
 
 Custom maps (v2 format, JSON) are freely available from BeatSaver and trivially parseable. Official/DLC maps are locked inside Unity asset bundles and harder to extract. The bulk of accessible training data will come from the custom map community.
+
+---
+
+## Local Installation Structure
+
+Explored: `C:\Program Files (x86)\Steam\steamapps\common\Beat Saber`
+
+### Top-Level
+```
+Beat Saber.exe
+Beat Saber_Data/
+    Managed/              # .NET assemblies (BeatmapCore.dll, etc.)
+    StreamingAssets/       # Addressable assets (official maps)
+    CustomLevels/         # Plain JSON custom/built-in maps
+```
+
+### Built-In Custom Levels (2 tracks)
+Located in `Beat Saber_Data/CustomLevels/`:
+- `Jaroslav Beck - Beat Saber (Built in)` — v2 Info.dat, v2 beatmaps, 166 BPM
+- `Jaroslav Beck - Magic (Built in)` — v2 Info.dat, **v3 beatmaps**, 208 BPM
+
+Each folder contains: `Info.dat`, multiple `{Difficulty}.dat` files (Easy through ExpertPlus, plus OneSaber/NoArrows/360/90 variants), `song.ogg`, `cover.png`.
+
+**Important edge case:** Magic has v2 `Info.dat` (`_version: 2.0.0`) but v3 difficulty files (`version: 3.0.0`). Info.dat and beatmap versions must be detected independently per file.
+
+### Official/DLC Maps — Unity Asset Bundles
+Located in `Beat Saber_Data/StreamingAssets/aa/StandaloneWindows64/`:
+
+- **`BeatmapLevelsData/`** — ~60 binary files named by track ID (e.g., `100bills`, `beatsaber`, `crabrave`, `crystallized`). 6-22 MB each. NOT JSON — binary compressed.
+- **`.bundle` files** — 140+ Unity asset bundles (676 MB total). Named like `{pack}_assets_all__{hash}.bundle` (e.g., `ostvol1_pack_assets_all_*.bundle`, `billieeilish_pack_assets_all_*.bundle`). 38 pack bundles covering 8 OST volumes + ~30 DLC packs.
+- **`catalog.json`** (841 KB) — Unity Addressables master catalog referencing all content bundles.
+
+## Unity Asset Extraction
+
+### UnityPy (Recommended Python Library)
+- **Install:** `pip install UnityPy`
+- Load any `.assets`, `.bundle`, folder, or bytes
+- Key asset types for maps: `TextAsset` (map JSON data), `MonoBehaviour` (serialized C# classes), `AudioClip` (song audio)
+- For `TextAsset`: access `data.m_Script`, decode with `encode("utf-8", "surrogateescape")`
+- For gzip-compressed content: check for magic bytes `1f 8b`, decompress before JSON parsing
+- MonoBehaviour may need `TypeTreeGenerator` if type trees are missing from bundles
+
+### Other Extraction Tools (GUI, for exploration)
+- [AssetRipper](https://github.com/AssetRipper/AssetRipper) — C# GUI, full project reconstruction
+- [UABE/UABEA](https://github.com/SeriousCache/UABE) — C# GUI, manual asset inspection
+- [AssetStudio](https://github.com/Perfare/AssetStudio) — C# GUI, visual exploration and bulk export
+
+**Recommended workflow:** Use AssetRipper/AssetStudio first to visually identify which bundle files contain map data, then automate with UnityPy.
+
+## BeatSaver API
+
+### Endpoints
+- Base URL: `https://api.beatsaver.com`
+- [Swagger docs](https://api.beatsaver.com/docs/)
+- `GET /search/text/{page}` — full-text search with filters (sortOrder, minRating, pageSize=20)
+- `GET /maps/id/{id}` — get map by BeatSaver ID
+- `GET /maps/hash/{hash}` — get map by hash
+- `GET /maps/latest` — latest maps (paginated)
+- Download URL in response: `versions[0].downloadURL` (zip file)
+
+### Filtering
+- `score >= 0.7` (70%+ user rating) filters ~20k-40k usable maps from ~115k total
+- `automapper=false` to exclude AI-generated maps
+- Response includes `stats.score`, `stats.upvotes`, `stats.downvotes`, `versions[0].diffs[*].nps`
+
+### Rate Limiting
+- Be polite: 1 request/second
+- Respect `Retry-After` headers
+
+### Python Wrappers
+- [BeatSaver.py](https://github.com/Sirspam/BeatSaver.py) — PyPI package
+- [beatsaver-python](https://github.com/megamaz/beatsaver-python) — alternative
+
+### Bulk Download Tools
+- [ARBSMapDo](https://github.com/Luux/ARBSMapDo) — filter by ScoreSaber rank + BeatSaver metadata
+- [Map Pack Downloader](https://github.com/medAndro/Beatsaber-Map-Pack-Downloader) — download from playlists
+
+## Existing ML Automapper Projects
+
+### DeepSaber (OxAI Labs)
+- **Repo:** [github.com/oxai/deepsaber](https://github.com/oxai/deepsaber)
+- **Data:** 765 songs (613 train / 80 val / 72 test), ~40 hours audio, 903k training actions
+- **Dataset:** [MEGA download](https://mega.nz/#!sABVnYYJ!ZWImW0OSCD_w8Huazxs3Vr0p_2jCqmR44IB9DCKWxac)
+- **Source:** Scraped from BeatSaver/BeastSaber
+- **Audio features:** `librosa` mel spectrograms (multi-resolution, size 80 and 100)
+- **Model:** Two-stage: WaveNet/DDC for block timing, then beam search (beam_size=17) for block selection
+- **Pre-trained weights:** [MEGA](https://mega.nz/#!tJBxTC5C!nXspSCKfJ6PYJjdKkFVzIviYEhr0BSg8zXINBqC5rpA)
+
+### InfernoSaber
+- **Repo:** [github.com/fred-brenner/InfernoSaber---BeatSaber-Automapper](https://github.com/fred-brenner/InfernoSaber---BeatSaber-Automapper)
+- **Data:** Hundreds of user-created maps from BeatSaver/BSaber (excludes modded/out-of-bounds maps)
+- **Model:** Four consecutive models: convolutional autoencoder → TCN for timing → DNN for note placement → DNN for lighting
+- **Requirements:** 10-20 GB RAM, 8-15 GB VRAM per 50 maps
+- **Pre-trained:** [Hugging Face](https://huggingface.co/BierHerr/InfernoSaber)
+
+### BeatMapSynthesizer
+- **Repo:** [github.com/wvsharber/BeatMapSynthesizer](https://github.com/wvsharber/BeatMapSynthesizer)
+- **Data:** ~8,000 maps from BeatSaver (filtered to >70% rating from 20k+ available)
+- **Pipeline:** BeatSaver API download → extract audio + JSON → `librosa` beat detection + spectral features → align with block data → store as Pandas DataFrames
+- **Model:** Hidden Markov Models (5 hidden states per difficulty) using `markovify`
+- **Blog:** [Medium writeup](https://medium.com/swlh/beatmapsynth-an-automatic-song-mapper-for-beat-saber-aa9e59f093f8)
+
+### Beat Sage
+- **Website:** [beatsage.com](https://beatsage.com/)
+- **Model:** Two neural networks: timing network (spectrogram → block placement) + block assignment network (timestamp → note properties)
+- **Data:** Curated official + community maps (not open-sourced)
