@@ -78,7 +78,8 @@ See [LEARNINGS.md](LEARNINGS.md) for full research details.
 
 - **Architecture:** Encoder-decoder transformer (~20-60M params)
 - **Audio input:** Log-mel spectrogram (80 bins, sr=22050, hop=512, ~43 fps), beat-aligned framing
-- **Output:** Beat-quantized event tokens with compound notes (~305 token vocabulary)
+- **Scope:** Color notes only (no bombs, walls, arcs, chains until core model performs well)
+- **Output:** Beat-quantized event tokens with compound notes (~290 token vocabulary)
 - **Quantization:** 1/16th note beat subdivisions
 - **Token format:** `[DIFF] [BAR] [POS] [LEFT_TOKEN] [RIGHT_TOKEN] ...`
 - **Sequence length:** ~2,500-4,000 tokens for 3-min Expert map

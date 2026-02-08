@@ -538,11 +538,13 @@ Prepend a difficulty token (`[EASY]` through `[EXPERT_PLUS]`) to the decoder seq
 
 ### Recommended: Beat-Quantized Event Tokens with Compound Notes
 
+**Scope decision:** The model generates **color notes only** — no bombs, walls, arcs, or chains. Rationale: bombs/walls are rare in training data (10-50x fewer than notes), arcs/chains are v3+ only (absent from most community maps), and color notes are the core gameplay. Additional elements can be layered on later via post-processing or model expansion.
+
 **Beat quantization:** Snap all note times to 1/16th note subdivisions (4 slots per beat). This aligns with how maps are authored — the BSMG Wiki confirms 90%+ of notes fall on standard subdivisions. Validated as "vital" by the ISMIR 2023 paper.
 
 **Compound tokens with fixed hand slots:** At each active beat position, emit `[LEFT_TOKEN] [RIGHT_TOKEN]` where each is either EMPTY or a compound encoding of `(x, y, direction)`.
 
-### Token Vocabulary (~305 tokens)
+### Token Vocabulary (~290 tokens)
 
 | Category | Count | Description |
 |----------|-------|-------------|
@@ -550,9 +552,8 @@ Prepend a difficulty token (`[EASY]` through `[EXPERT_PLUS]`) to the decoder seq
 | BAR | 1 | Bar boundary marker |
 | Left hand | 109 | 108 note configs (12 positions × 9 directions) + EMPTY |
 | Right hand | 109 | Same as left hand |
-| Bomb | 13 | 12 grid positions + NO_BOMB |
 | Difficulty | 5 | Easy through ExpertPlus |
-| Special | 4 | START, END, PAD, BAR |
+| Special | 3 | START, END, PAD |
 
 ### Sequence Format Example
 
@@ -585,7 +586,7 @@ All well within transformer context windows.
 | Frame-based 20 Hz | ~34 outputs/frame | 3,600 | ~40% active | DDC, Beat Sage |
 | Frame-based 50 Hz | ~34 outputs/frame | 9,000 | ~16% active | DDC |
 | Event factored | ~75-225 | 8,000-10,000 | None | Music Transformer |
-| **Event compound (recommended)** | **~305** | **2,500-4,000** | **None** | **Compound Word Transformer** |
+| **Event compound (recommended)** | **~290** | **2,500-4,000** | **None** | **Compound Word Transformer** |
 | Beat-quantized factored | ~100-200 | 5,000-7,000 | None | ISMIR 2023 |
 
 ---
