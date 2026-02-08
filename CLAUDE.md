@@ -35,6 +35,21 @@ Given an audio file as input, the system generates block positions and orientati
 - Enables continuous improvement of the model through real gameplay data
 - Additional source of training data beyond what's publicly available
 
+## Beat Saber Map Format Quick Reference
+
+Maps are **JSON files** in folders. See [LEARNINGS.md](LEARNINGS.md) for full format details.
+
+- **Schemas:** v2 (most custom maps), v3, v4 (latest official). All JSON-based, `.dat` extension.
+- **Entry point:** `Info.dat` — song metadata, references difficulty files
+- **Grid:** 4 columns (x: 0-3) x 3 rows (y: 0-2)
+- **Colors:** 0 = Red/Left, 1 = Blue/Right
+- **Cut directions:** 0=Up, 1=Down, 2=Left, 3=Right, 4=UpLeft, 5=UpRight, 6=DownLeft, 7=DownRight, 8=Any
+- **Timing:** All in beats (float). Convert: `seconds = beat * 60.0 / BPM`
+- **Custom maps location:** `<Beat Saber>/Beat Saber_Data/CustomLevels/`
+- **Official maps:** Locked in Unity asset bundles (not plain files)
+- **Training data source:** Custom maps from [BeatSaver](https://beatsaver.com/) (v2 JSON, freely available)
+- **Local install:** `C:\Program Files (x86)\Steam\steamapps\common\Beat Saber`
+
 ## Open Questions
 
 ### Scoring and Labeling Strategy
