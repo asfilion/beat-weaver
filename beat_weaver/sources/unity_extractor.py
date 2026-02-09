@@ -286,8 +286,29 @@ def _extract_level_bundle(
 
         beatmap_filenames.append((char, diff, filename))
 
+    # Extract AudioClip (song audio) as WAV file.
+    # UnityPy decodes AudioClips to WAV via the samples property.
+    audio_filename = ""
+    for obj in env.objects:
+        if obj.type.name == "AudioClip":
+            try:
+                clip = obj.parse_as_object()
+                for clip_name, clip_data in clip.samples.items():
+                    audio_out = out_folder / "song.wav"
+                    audio_out.write_bytes(clip_data)
+                    audio_filename = "song.wav"
+                    logger.debug(
+                        "Extracted audio: %s (%d bytes)", level_id, len(clip_data),
+                    )
+                    break
+            except Exception:
+                logger.warning("Failed to extract AudioClip from %s", bundle_path)
+            break
+
     # Synthesise a v2-style Info.dat so parse_map_folder() can read the folder.
-    info = _build_info_dat(level_id, pack_meta, bpm, njs_lookup, beatmap_filenames)
+    info = _build_info_dat(
+        level_id, pack_meta, bpm, njs_lookup, beatmap_filenames, audio_filename,
+    )
     info_path = out_folder / "Info.dat"
     info_path.write_text(json.dumps(info, indent=2), encoding="utf-8")
 
@@ -300,6 +321,7 @@ def _build_info_dat(
     bpm: float,
     njs_lookup: dict[str, tuple[float, float]],
     beatmap_filenames: list[tuple[str, str, str]],
+    audio_filename: str = "",
 ) -> dict:
     """Synthesise a v2-style Info.dat from extracted metadata."""
     song_name = ""
@@ -343,6 +365,7 @@ def _build_info_dat(
         "_levelAuthorName": level_author,
         "_beatsPerMinute": bpm,
         "_songTimeOffset": pack_meta.get("offset", 0.0) if pack_meta else 0.0,
+        "_songFilename": audio_filename,
         "_difficultyBeatmapSets": diff_sets,
     }
 

@@ -43,6 +43,9 @@ class ModelConfig:
     gradient_clip_norm: float = 1.0
     early_stopping_patience: int = 10
 
+    # Data weighting
+    official_ratio: float = 0.2  # Target fraction of each batch from official maps
+
     # Auxiliary losses
     density_loss_weight: float = 0.1
 

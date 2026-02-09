@@ -1,20 +1,24 @@
 # Codebase Reference
 
-Quick reference for the existing beat_weaver package structure, generated for AI context.
+Quick reference for the beat_weaver package structure, generated for AI context.
 
 ## Directory Tree
 
 ```
 beat_weaver/
 ├── __init__.py                          # "Beat Weaver - AI-powered Beat Saber track generator."
-├── cli.py                               # Command-line interface (download, extract-official, process, run)
-├── model/                               # ML model package (NEW - being implemented)
+├── cli.py                               # CLI: download, extract-official, process, run, train, generate, evaluate
+├── model/                               # ML model package (requires [ml] optional deps)
 │   ├── __init__.py
-│   ├── audio.py                         # Mel spectrogram extraction + beat-aligned framing
+│   ├── audio.py                         # Mel spectrogram extraction + beat-aligned framing + audio manifest
 │   ├── config.py                        # ModelConfig dataclass with all hyperparameters
 │   ├── dataset.py                       # PyTorch Dataset: Parquet + audio → (mel, tokens, mask)
+│   ├── evaluate.py                      # Quality metrics: onset F1, NPS accuracy, parity, diversity
+│   ├── exporter.py                      # Token sequence → playable v2 Beat Saber map folder
+│   ├── inference.py                     # Autoregressive generation with grammar-constrained decoding
 │   ├── tokenizer.py                     # Token vocabulary (291), encode/decode beatmap ↔ tokens
-│   └── transformer.py                   # AudioEncoder + TokenDecoder + BeatWeaverModel
+│   ├── training.py                      # Training loop: mixed-precision, checkpointing, early stopping
+│   └── transformer.py                   # AudioEncoder + TokenDecoder + BeatWeaverModel (~40M params)
 ├── parsers/
 │   ├── __init__.py
 │   ├── beatmap_parser.py               # Top-level: parse_map_folder(path) → list[NormalizedBeatmap]
@@ -34,18 +38,24 @@ beat_weaver/
 │   └── processor.py                    # Individual map processing
 ├── sources/
 │   ├── __init__.py
-│   ├── beatsaver.py                    # BeatSaver API client + downloader
+│   ├── beatsaver.py                    # BeatSaver API client + downloader (score≥0.75, upvotes≥5)
 │   ├── local_custom.py                 # Local CustomLevels iteration
-│   └── unity_extractor.py             # Official maps from Unity bundles
+│   └── unity_extractor.py             # Official maps + audio from Unity bundles (65 levels, WAV audio)
 └── storage/
     ├── __init__.py
     └── writer.py                       # Parquet output (notes/bombs/obstacles) + JSON metadata
 
 tests/
 ├── __init__.py
-├── test_schemas.py                     # Schema & version parsing tests (16 tests)
+├── test_audio.py                       # Audio preprocessing tests (9 tests, skipped without [ml])
+├── test_evaluate.py                    # Evaluation metrics tests (19 tests)
+├── test_exporter.py                    # Map export tests (4 tests, skipped without [ml])
+├── test_inference.py                   # Grammar mask + generation tests (12 tests, skipped without [ml])
+├── test_model.py                       # Transformer forward/backward tests (9 tests, skipped without [ml])
 ├── test_parsers.py                     # Info/beatmap parser tests (11 tests)
-└── test_tokenizer.py                   # Tokenizer encode/decode tests (NEW)
+├── test_schemas.py                     # Schema & version parsing tests (16 tests)
+├── test_tokenizer.py                   # Tokenizer encode/decode tests (26 tests)
+└── test_weighted_sampler.py            # Source weighting tests (9 tests)
 ```
 
 ## Core Dataclasses (`beat_weaver/schemas/normalized.py`)
@@ -116,10 +126,13 @@ class NormalizedBeatmap:
 
 ## CLI Entry Points (`beat_weaver/cli.py`)
 
-- `beat-weaver download` — Download custom maps from BeatSaver API
-- `beat-weaver extract-official` — Extract official maps from Unity bundles
+- `beat-weaver download` — Download custom maps from BeatSaver API (score≥0.75, upvotes≥5)
+- `beat-weaver extract-official` — Extract official maps + audio from Unity bundles
 - `beat-weaver process` — Normalize raw maps to Parquet
 - `beat-weaver run` — Full pipeline (all sources)
+- `beat-weaver train` — Train the ML model
+- `beat-weaver generate` — Generate a Beat Saber map from audio
+- `beat-weaver evaluate` — Evaluate model on test data
 
 Entry point: `beat-weaver = "beat_weaver.cli:main"` (pyproject.toml)
 
@@ -139,7 +152,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+ml = [
+    "torch>=2.2",
+    "torchaudio>=2.2",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "tensorboard>=2.16",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
 
 [project.scripts]
 beat-weaver = "beat_weaver.cli:main"

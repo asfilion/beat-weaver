@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from beat_weaver.model.config import ModelConfig
-from beat_weaver.model.dataset import BeatSaberDataset, collate_fn
+from beat_weaver.model.dataset import BeatSaberDataset, build_weighted_sampler, collate_fn
 from beat_weaver.model.tokenizer import PAD
 from beat_weaver.model.transformer import BeatWeaverModel
 
@@ -220,10 +220,12 @@ def train(
         trainer.load_checkpoint(resume_from)
         logger.info("Resumed from %s (epoch %d)", resume_from, trainer.epoch)
 
+    sampler = build_weighted_sampler(train_dataset, config.official_ratio)
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
-        shuffle=True,
+        shuffle=sampler is None,  # shuffle only when no weighted sampler
+        sampler=sampler,
         collate_fn=collate_fn,
         num_workers=0,  # audio loading not picklable
         pin_memory=trainer.device.type == "cuda",

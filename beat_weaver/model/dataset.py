@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, WeightedRandomSampler
 
 from beat_weaver.model.audio import (
     beat_align_spectrogram,
@@ -113,12 +113,15 @@ class BeatSaberDataset(Dataset):
                 continue
             if song_hash not in self.audio_manifest:
                 continue
+            meta = self.metadata.get(song_hash, {})
             self.samples.append({
                 "song_hash": song_hash,
                 "difficulty": difficulty,
                 "characteristic": characteristic,
                 "notes": note_dicts,
                 "bpm": note_dicts[0]["bpm"],
+                "source": meta.get("source", "unknown"),
+                "score": meta.get("score"),
             })
 
         logger.info(
@@ -220,3 +223,61 @@ def collate_fn(
     masks_stacked = torch.stack(masks)
 
     return mel_padded, mel_mask, tokens_stacked, masks_stacked
+
+
+def build_weighted_sampler(
+    dataset: BeatSaberDataset, official_ratio: float = 0.2,
+) -> WeightedRandomSampler | None:
+    """Build a WeightedRandomSampler that oversamples official maps.
+
+    Official maps are weighted to fill ``official_ratio`` of each batch.
+    Custom maps are weighted by their BeatSaver score (higher-rated maps
+    sampled more often).
+
+    Returns ``None`` if all samples come from a single source (no
+    rebalancing needed).
+    """
+    official_indices = []
+    custom_indices = []
+    custom_scores: list[float] = []
+
+    for i, sample in enumerate(dataset.samples):
+        if sample["source"] == "official":
+            official_indices.append(i)
+        else:
+            custom_indices.append(i)
+            # Default to 1.0 if score is missing
+            custom_scores.append(sample.get("score") or 1.0)
+
+    n_official = len(official_indices)
+    n_custom = len(custom_indices)
+
+    # No rebalancing needed if only one source present
+    if n_official == 0 or n_custom == 0:
+        return None
+
+    # Compute weights so official samples collectively account for
+    # ``official_ratio`` of the total sampling probability:
+    #   sum(w_official) / (sum(w_official) + sum(w_custom)) = official_ratio
+    # Within custom maps, weight by score.
+    sum_custom_scores = sum(custom_scores)
+    w_official = (official_ratio * sum_custom_scores) / (n_official * (1.0 - official_ratio))
+
+    weights = [0.0] * len(dataset)
+    for i in official_indices:
+        weights[i] = w_official
+    for i, idx in enumerate(custom_indices):
+        weights[idx] = custom_scores[i]
+
+    logger.info(
+        "Weighted sampler: %d official (w=%.4f), %d custom (mean_score=%.4f), "
+        "target official_ratio=%.0f%%",
+        n_official, w_official, n_custom,
+        sum_custom_scores / n_custom, official_ratio * 100,
+    )
+
+    return WeightedRandomSampler(
+        weights=weights,
+        num_samples=len(dataset),
+        replacement=True,
+    )
