@@ -45,7 +45,8 @@ class AudioEncoder(nn.Module):
         super().__init__()
         self.input_proj = nn.Linear(config.n_mels, config.encoder_dim)
         self.pos_enc = SinusoidalPositionalEncoding(
-            config.encoder_dim, dropout=config.dropout,
+            config.encoder_dim, max_len=config.max_audio_len,
+            dropout=config.dropout,
         )
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=config.encoder_dim,
@@ -88,7 +89,8 @@ class TokenDecoder(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(config.vocab_size, config.decoder_dim)
         self.pos_enc = SinusoidalPositionalEncoding(
-            config.decoder_dim, dropout=config.dropout,
+            config.decoder_dim, max_len=config.max_seq_len,
+            dropout=config.dropout,
         )
         decoder_layer = nn.TransformerDecoderLayer(
             d_model=config.decoder_dim,

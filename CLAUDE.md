@@ -35,6 +35,7 @@ Install: `pip install -e .` (core) or `pip install -e ".[ml]"` (with ML dependen
 |---------|-------------|
 | `beat-weaver download` | Download custom maps from BeatSaver API |
 | `beat-weaver extract-official` | Extract official maps from Unity bundles |
+| `beat-weaver build-manifest` | Build audio manifest from raw map folders |
 | `beat-weaver process` | Normalize raw maps to Parquet |
 | `beat-weaver run` | Full pipeline (all sources) |
 | `beat-weaver train` | Train the ML model |

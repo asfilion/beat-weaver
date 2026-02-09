@@ -20,6 +20,7 @@ class ModelConfig:
     n_mels: int = 80
     n_fft: int = 2048
     hop_length: int = 512
+    max_audio_len: int = 32768  # Max positional encoding length for audio encoder
 
     # Encoder
     encoder_layers: int = 6

@@ -128,7 +128,8 @@ class NormalizedBeatmap:
 
 - `beat-weaver download` — Download custom maps from BeatSaver API (score≥0.75, upvotes≥5)
 - `beat-weaver extract-official` — Extract official maps + audio from Unity bundles
-- `beat-weaver process` — Normalize raw maps to Parquet
+- `beat-weaver build-manifest` — Build audio manifest (hash -> audio path) from raw map folders
+- `beat-weaver process` — Normalize raw maps to Parquet (auto-detects source from path)
 - `beat-weaver run` — Full pipeline (all sources)
 - `beat-weaver train` — Train the ML model
 - `beat-weaver generate` — Generate a Beat Saber map from audio

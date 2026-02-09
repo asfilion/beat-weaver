@@ -69,10 +69,14 @@ class BeatSaberDataset(Dataset):
         self.processed_dir = Path(processed_dir)
         self.audio_manifest = load_manifest(audio_manifest_path)
 
-        # Load metadata
+        # Load metadata (writer produces a list; convert to dict keyed by hash)
         meta_path = self.processed_dir / "metadata.json"
         with open(meta_path) as f:
-            self.metadata: dict[str, dict] = json.load(f)
+            raw_meta = json.load(f)
+        if isinstance(raw_meta, list):
+            self.metadata: dict[str, dict] = {m["hash"]: m for m in raw_meta}
+        else:
+            self.metadata = raw_meta
 
         # Load notes from Parquet
         import pyarrow.parquet as pq

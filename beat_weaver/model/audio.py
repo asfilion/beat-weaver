@@ -5,7 +5,6 @@ Depends on librosa and soundfile (optional ML dependencies).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from pathlib import Path
@@ -129,13 +128,14 @@ _AUDIO_EXTENSIONS = {".ogg", ".egg", ".wav", ".mp3", ".flac"}
 
 
 def _hash_folder(folder: Path) -> str:
-    """Compute a content hash for a map folder (same as pipeline)."""
-    info_path = folder / "Info.dat"
-    if not info_path.exists():
-        info_path = folder / "info.dat"
-    if info_path.exists():
-        return hashlib.sha256(info_path.read_bytes()).hexdigest()[:16]
-    return folder.name
+    """Compute a content hash for a map folder.
+
+    Uses the same algorithm as ``beat_weaver.pipeline.processor.compute_map_hash``
+    so the audio manifest keys match the song hashes in the Parquet data.
+    """
+    from beat_weaver.pipeline.processor import compute_map_hash
+
+    return compute_map_hash(folder)
 
 
 def build_audio_manifest(raw_dirs: list[Path]) -> dict[str, str]:
