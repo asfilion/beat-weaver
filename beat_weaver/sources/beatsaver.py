@@ -3,6 +3,7 @@ import json
 import logging
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterator
 
@@ -62,10 +63,12 @@ class BeatSaverClient:
                 total_found += 1
                 yield doc
 
-            total_pages = data.get("totalPages", 0) if "totalPages" in data else 0
+            info = data.get("info", {})
+            total_pages = info.get("pages", 0)
             page += 1
             logger.info(
-                "Fetched page %d, total maps found so far: %d", page, total_found
+                "Fetched page %d / %d, total maps found so far: %d",
+                page, total_pages, total_found,
             )
 
             # Stop if we've gone past the score threshold (results are
@@ -78,13 +81,16 @@ class BeatSaverClient:
                 )
                 break
 
-            if page >= total_pages:
+            if total_pages > 0 and page >= total_pages:
                 break
 
             time.sleep(REQUEST_DELAY)
 
     def download_map(self, map_info: dict, dest_dir: Path) -> Path | None:
-        """Download and extract a single map zip to dest_dir/<hash>."""
+        """Download and extract a single map zip to dest_dir/<hash>.
+
+        Thread-safe: uses a fresh GET request instead of the shared session.
+        """
         try:
             map_hash = map_info["versions"][0]["hash"]
             target_dir = dest_dir / map_hash
@@ -96,7 +102,10 @@ class BeatSaverClient:
             if download_url.startswith("/"):
                 download_url = f"https://beatsaver.com{download_url}"
 
-            response = self.session.get(download_url)
+            response = requests.get(
+                download_url,
+                headers={"User-Agent": "BeatWeaver/0.1.0"},
+            )
             response.raise_for_status()
 
             with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
@@ -120,26 +129,84 @@ class BeatSaverClient:
         dest_dir: Path,
         min_score: float = DEFAULT_MIN_SCORE,
         min_upvotes: int = DEFAULT_MIN_UPVOTES,
-        max_maps: int = 100,
+        max_maps: int = 0,
+        workers: int = 8,
     ) -> list[Path]:
-        """Search and download maps, returning list of extracted directories."""
+        """Search and download maps, returning list of extracted directories.
+
+        Args:
+            dest_dir: Directory to extract maps into (each map gets its own subfolder).
+            min_score: Minimum BeatSaver rating score (0.0-1.0).
+            min_upvotes: Minimum number of upvotes.
+            max_maps: Maximum maps to download. 0 means unlimited (all qualifying maps).
+            workers: Number of parallel download threads (default 8).
+
+        API pagination is sequential (to respect rate limits), but zip
+        file downloads run in parallel for throughput.  Already-downloaded
+        maps (detected by hash folder existence) are skipped automatically,
+        making this safe to resume after interruption.
+        """
         from tqdm import tqdm
 
         dest_dir.mkdir(parents=True, exist_ok=True)
-        downloaded = []
+        downloaded: list[Path] = []
+        skipped = 0
+        newly_downloaded = 0
 
-        with tqdm(total=max_maps, desc="Downloading maps") as pbar:
+        desc = "Downloading maps" if max_maps == 0 else f"Downloading maps (max {max_maps})"
+        pbar = tqdm(total=max_maps or None, desc=desc)
+
+        # Collect map_info objects that need downloading, then download in
+        # parallel batches.  Already-present maps are counted immediately.
+        batch: list[dict] = []
+
+        def _flush_batch() -> None:
+            nonlocal newly_downloaded
+            if not batch:
+                return
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(self.download_map, info, dest_dir): info
+                    for info in batch
+                }
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result is not None:
+                        newly_downloaded += 1
+                        downloaded.append(result)
+                        pbar.update(1)
+                        pbar.set_postfix(new=newly_downloaded, skipped=skipped)
+            batch.clear()
+
+        try:
             for map_info in self.search_maps(
                 min_score=min_score, min_upvotes=min_upvotes,
             ):
-                result = self.download_map(map_info, dest_dir)
-                if result is not None:
-                    downloaded.append(result)
-                    pbar.update(1)
+                map_hash = map_info["versions"][0]["hash"]
+                target_dir = dest_dir / map_hash
 
-                if len(downloaded) >= max_maps:
+                if target_dir.exists():
+                    skipped += 1
+                    downloaded.append(target_dir)
+                    pbar.update(1)
+                    pbar.set_postfix(new=newly_downloaded, skipped=skipped)
+                else:
+                    batch.append(map_info)
+                    if len(batch) >= workers * 2:
+                        _flush_batch()
+
+                if max_maps > 0 and len(downloaded) >= max_maps:
                     break
 
+            # Flush remaining
+            _flush_batch()
+        finally:
+            pbar.close()
+
+        logger.info(
+            "Download complete: %d total (%d new, %d already present)",
+            len(downloaded), newly_downloaded, skipped,
+        )
         return downloaded
 
 

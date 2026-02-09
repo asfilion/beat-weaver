@@ -107,6 +107,25 @@ def beat_align_spectrogram(
     return aligned
 
 
+def detect_bpm(
+    audio: np.ndarray, sr: int = 22050, default: float = 120.0,
+) -> float:
+    """Estimate the BPM of an audio signal using librosa beat tracking.
+
+    Returns the estimated tempo as a float.  Falls back to *default*
+    (120 BPM) when beat tracking cannot determine a tempo (e.g. for very
+    short or non-rhythmic audio).
+    """
+    tempo, _ = librosa.beat.beat_track(y=audio, sr=sr)
+    # librosa may return an array; extract scalar
+    if hasattr(tempo, "__len__"):
+        tempo = float(tempo[0]) if len(tempo) > 0 else default
+    tempo = float(tempo)
+    if tempo <= 0:
+        return default
+    return tempo
+
+
 def compute_onset_envelope(
     audio: np.ndarray,
     sr: int = 22050,

@@ -10,7 +10,7 @@ beat_weaver/
 ├── cli.py                               # CLI: download, extract-official, build-manifest, process, run, train, generate, evaluate
 ├── model/                               # ML model package (requires [ml] optional deps)
 │   ├── __init__.py
-│   ├── audio.py                         # Mel spectrogram extraction + beat-aligned framing + audio manifest
+│   ├── audio.py                         # Mel spectrogram extraction + beat-aligned framing + BPM detection + audio manifest
 │   ├── config.py                        # ModelConfig dataclass with all hyperparameters
 │   ├── dataset.py                       # PyTorch Dataset: Parquet + audio → (mel, tokens, mask)
 │   ├── evaluate.py                      # Quality metrics: onset F1, NPS accuracy, parity, diversity
@@ -38,16 +38,16 @@ beat_weaver/
 │   └── processor.py                    # Individual map processing
 ├── sources/
 │   ├── __init__.py
-│   ├── beatsaver.py                    # BeatSaver API client + downloader (score≥0.75, upvotes≥5)
+│   ├── beatsaver.py                    # BeatSaver API client + parallel downloader (score≥0.9, upvotes≥5)
 │   ├── local_custom.py                 # Local CustomLevels iteration
-│   └── unity_extractor.py             # Official maps + audio from Unity bundles (65 levels, WAV audio)
+│   └── unity_extractor.py             # Official maps + audio from Unity bundles (214 levels: 65 base + 149 DLC)
 └── storage/
     ├── __init__.py
     └── writer.py                       # Parquet output (notes/bombs/obstacles) + JSON metadata
 
 tests/
 ├── __init__.py
-├── test_audio.py                       # Audio preprocessing tests (9 tests, skipped without [ml])
+├── test_audio.py                       # Audio preprocessing tests (12 tests, skipped without [ml])
 ├── test_evaluate.py                    # Evaluation metrics tests (19 tests)
 ├── test_exporter.py                    # Map export tests (4 tests, skipped without [ml])
 ├── test_inference.py                   # Grammar mask + generation tests (12 tests, skipped without [ml])
@@ -126,13 +126,13 @@ class NormalizedBeatmap:
 
 ## CLI Entry Points (`beat_weaver/cli.py`)
 
-- `beat-weaver download` — Download custom maps from BeatSaver API (score≥0.75, upvotes≥5)
-- `beat-weaver extract-official` — Extract official maps + audio from Unity bundles
+- `beat-weaver download` — Download custom maps from BeatSaver API (parallel, resumable, score≥0.9, upvotes≥5)
+- `beat-weaver extract-official` — Extract official maps + audio from Unity bundles (base + DLC)
 - `beat-weaver build-manifest` — Build audio manifest (hash -> audio path) from raw map folders
 - `beat-weaver process` — Normalize raw maps to Parquet (auto-detects source from path)
 - `beat-weaver run` — Full pipeline (all sources)
 - `beat-weaver train` — Train the ML model
-- `beat-weaver generate` — Generate a Beat Saber map from audio
+- `beat-weaver generate` — Generate a Beat Saber map from audio (BPM auto-detected if not provided)
 - `beat-weaver evaluate` — Evaluate model on test data
 
 Entry point: `beat-weaver = "beat_weaver.cli:main"` (pyproject.toml)

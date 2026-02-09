@@ -56,6 +56,7 @@ BUNDLES_SUBPATH = (
 LEVELS_DATA_SUBPATH = (
     Path("Beat Saber_Data") / "StreamingAssets" / "BeatmapLevelsData"
 )
+DLC_LEVELS_SUBPATH = Path("DLC") / "Levels"
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +414,32 @@ def discover_bundles(
     }
 
 
+def _collect_level_bundles(
+    beat_saber_path: Path,
+) -> list[Path]:
+    """Collect level bundle files from both BeatmapLevelsData and DLC/Levels."""
+    bundles: list[Path] = []
+
+    # Standard location: BeatmapLevelsData/<levelID>
+    levels_dir = beat_saber_path / LEVELS_DATA_SUBPATH
+    if levels_dir.exists():
+        for f in sorted(levels_dir.iterdir()):
+            if f.is_file():
+                bundles.append(f)
+
+    # DLC location: DLC/Levels/<LevelName>/<bundlefile>
+    dlc_dir = beat_saber_path / DLC_LEVELS_SUBPATH
+    if dlc_dir.exists():
+        for level_folder in sorted(dlc_dir.iterdir()):
+            if not level_folder.is_dir():
+                continue
+            for f in level_folder.iterdir():
+                if f.is_file():
+                    bundles.append(f)
+
+    return bundles
+
+
 def extract_official_maps(
     bundles_dir: Path | None = None,
     output_dir: Path = Path("data/official_extracted"),
@@ -423,6 +450,9 @@ def extract_official_maps(
     Each level becomes a folder with an ``Info.dat`` and per-difficulty
     ``.dat`` files (gzip-compressed v4 JSON), consumable by
     ``parse_map_folder()``.
+
+    Scans both the standard ``BeatmapLevelsData`` directory and the
+    ``DLC/Levels`` directory for level bundles.
 
     Args:
         bundles_dir: Path to ``StandaloneWindows64`` directory.  Derived
@@ -435,10 +465,10 @@ def extract_official_maps(
     """
     if bundles_dir is None:
         bundles_dir = beat_saber_path / BUNDLES_SUBPATH
-    levels_dir = beat_saber_path / LEVELS_DATA_SUBPATH
 
-    if not levels_dir.exists():
-        logger.error("BeatmapLevelsData directory not found: %s", levels_dir)
+    level_bundles = _collect_level_bundles(beat_saber_path)
+    if not level_bundles:
+        logger.error("No level bundles found in %s", beat_saber_path)
         return []
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -452,12 +482,8 @@ def extract_official_maps(
     )
 
     extracted: list[Path] = []
-    level_bundles = sorted(levels_dir.iterdir())
 
     for bundle_path in level_bundles:
-        if not bundle_path.is_file():
-            continue
-
         level_id = bundle_path.name
         # Match to pack metadata (case-insensitive).
         meta = None
@@ -473,5 +499,8 @@ def extract_official_maps(
         else:
             logger.warning("Skipped: %s", level_id)
 
-    logger.info("Extracted %d / %d level bundles", len(extracted), len(level_bundles))
+    logger.info(
+        "Extracted %d / %d level bundles (BeatmapLevelsData + DLC)",
+        len(extracted), len(level_bundles),
+    )
     return extracted
