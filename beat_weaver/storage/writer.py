@@ -240,6 +240,20 @@ def write_parquet(
             }
         )
 
+    # Clamp int8 columns to [-128, 127] to handle mapping-extension maps
+    def _clamp8(values: list[int]) -> list[int]:
+        return [max(-128, min(127, v)) for v in values]
+
+    for cols in notes_by_hash.values():
+        for k in ("x", "y", "color", "cut_direction"):
+            cols[k] = _clamp8(cols[k])
+    for bcols in bombs_by_hash.values():
+        for k in ("x", "y"):
+            bcols[k] = _clamp8(bcols[k])
+    for ocols in obstacles_by_hash.values():
+        for k in ("x", "y", "width", "height"):
+            ocols[k] = _clamp8(ocols[k])
+
     # Convert accumulated columns to Arrow tables (one per song_hash)
     notes_tables = {
         h: pa.table(cols, schema=NOTES_SCHEMA)

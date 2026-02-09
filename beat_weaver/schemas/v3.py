@@ -26,10 +26,10 @@ def parse_v3_notes(beatmap: dict, bpm: float) -> tuple[list[Note], list[Bomb]]:
         notes.append(Note(
             beat=beat,
             time_seconds=time_seconds,
-            x=raw["x"],
-            y=raw["y"],
-            color=raw["c"],
-            cut_direction=raw["d"],
+            x=raw.get("x", 0),
+            y=raw.get("y", 0),
+            color=raw.get("c", 0),
+            cut_direction=raw.get("d", 8),
             angle_offset=raw.get("a", 0),
         ))
 
@@ -39,8 +39,8 @@ def parse_v3_notes(beatmap: dict, bpm: float) -> tuple[list[Note], list[Bomb]]:
         bombs.append(Bomb(
             beat=beat,
             time_seconds=time_seconds,
-            x=raw["x"],
-            y=raw["y"],
+            x=raw.get("x", 0),
+            y=raw.get("y", 0),
         ))
 
     notes.sort(key=lambda n: n.beat)
@@ -66,10 +66,10 @@ def parse_v3_obstacles(beatmap: dict, bpm: float) -> list[Obstacle]:
         obstacles.append(Obstacle(
             beat=beat,
             time_seconds=time_seconds,
-            duration_beats=raw["d"],
-            x=raw["x"],
+            duration_beats=raw.get("d", 1.0),
+            x=raw.get("x", 0),
             y=raw.get("y", 0),
-            width=raw["w"],
+            width=raw.get("w", 1),
             height=raw.get("h", 5),
         ))
 
