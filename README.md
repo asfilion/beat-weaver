@@ -10,7 +10,7 @@ Beat Weaver uses machine learning to automatically generate [Beat Saber](https:/
 
 ## Features
 
-- **Audio-to-map generation** — provide an audio file + BPM, get a playable v2 Beat Saber map
+- **Audio-to-map generation** — provide an audio file, get a playable v2 Beat Saber map (BPM auto-detected or manual)
 - **Difficulty selection** — generate for Easy, Normal, Hard, Expert, or ExpertPlus
 - **Seeded generation** — use a fixed seed for repeatable tracks, or randomize for variety
 - **Grammar-constrained decoding** — generated maps always follow valid Beat Saber structure
@@ -34,10 +34,10 @@ pip install -e ".[ml,dev]"
 ### Data Pipeline
 
 ```bash
-# Download community maps from BeatSaver
-beat-weaver download --max-maps 500
+# Download community maps from BeatSaver (resumable, parallel)
+beat-weaver download --min-score 0.9
 
-# Extract official maps from Unity bundles
+# Extract official maps + DLC from Unity bundles
 beat-weaver extract-official
 
 # Process all raw maps into training-ready Parquet
@@ -60,10 +60,10 @@ beat-weaver train --audio-manifest data/audio_manifest.json --resume output/trai
 ### Map Generation
 
 ```bash
-# Generate a Beat Saber map from audio
-beat-weaver generate --checkpoint output/training/checkpoints/best --audio song.ogg --bpm 128 --difficulty Expert --output my_map/
+# Generate a Beat Saber map from audio (BPM auto-detected)
+beat-weaver generate --checkpoint output/training/checkpoints/best --audio song.ogg --difficulty Expert --output my_map/
 
-# With seed for reproducibility
+# With explicit BPM and seed for reproducibility
 beat-weaver generate --checkpoint output/training/checkpoints/best --audio song.ogg --bpm 128 --seed 42
 ```
 
@@ -98,7 +98,7 @@ See [LEARNINGS.md](LEARNINGS.md) for research details and [plans/](plans/) for i
 ## Tests
 
 ```bash
-# Run all tests (115 total; ML tests auto-skip without ML deps)
+# Run all tests (118 total; ML tests auto-skip without ML deps)
 python -m pytest tests/ -v
 ```
 

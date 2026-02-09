@@ -388,8 +388,8 @@ Located in `Beat Saber_Data/StreamingAssets/aa/StandaloneWindows64/`:
 
 ## Unity Bundle Internal Structure (Verified via Extraction)
 
-### Two-Location Architecture
-Official maps are stored across two locations:
+### Three-Location Architecture
+Official maps are stored across three locations:
 
 1. **Pack bundles** (`StandaloneWindows64/<pack>_pack_assets_all_*.bundle`):
    - 38 pack bundles total (OST volumes + DLC packs)
@@ -397,14 +397,20 @@ Official maps are stored across two locations:
    - 328 levels with metadata extracted across all packs
 
 2. **Level data bundles** (`BeatmapLevelsData/<levelID>` — no file extension):
-   - 65 UnityFS bundles, one per level
+   - 65 UnityFS bundles, one per level (base game / OST)
    - Contain:
      - `MonoBehaviour` ("BeatmapLevelDataSO") mapping characteristics+difficulties to `TextAsset` path IDs
      - Gzipped `TextAsset` files: `<Name><Diff>.beatmap.gz` (v4 JSON), `<Name>.audio.gz` (BPM/sample data), `<Name>.lightshow.gz`
      - `AudioClip` (song audio) — extractable via `obj.parse_as_object().samples` → `{filename: bytes}` WAV data
 
+3. **DLC level bundles** (`DLC/Levels/<LevelName>/<bundlefile>`):
+   - 149 individual bundles, one per DLC level
+   - Same internal structure as BeatmapLevelsData bundles (MonoBehaviour + TextAssets + AudioClip)
+   - Container paths reference `packages/com.beatgames.beatsaber.packs.<pack-name>/so/<levelname>/`
+   - Pack metadata may not exist for all DLC levels; BPM falls back to audio.gz derivation
+
 ### AudioClip Extraction
-UnityPy can decode AudioClip assets directly. `clip.samples` returns a dict of `{filename: bytes}` containing decoded WAV audio. All 65 level bundles contain an AudioClip asset. Total extracted audio: ~2 GB WAV. Audio is written as `song.wav` alongside the beatmap files, and `_songFilename` is set in the synthesized `Info.dat`.
+UnityPy can decode AudioClip assets directly. `clip.samples` returns a dict of `{filename: bytes}` containing decoded WAV audio. All 214 level bundles (65 base + 149 DLC) contain an AudioClip asset. Total extracted audio: ~7.9 GB WAV. Audio is written as `song.wav` alongside the beatmap files, and `_songFilename` is set in the synthesized `Info.dat`.
 
 ### Level ID Matching
 Pack metadata uses `_levelID` (e.g., "100Bills"), level bundles use filename (e.g., "100bills"). Match is case-insensitive.
@@ -416,9 +422,10 @@ Pack metadata `_beatsPerMinute` is authoritative. Fallback: derive from `audio.g
 Each level extracted to a standard map folder with synthesized v2-style `Info.dat` + gzip-compressed v4 `.dat` files. The existing `parse_map_folder()` + `dat_reader` (auto-gzip) handles these seamlessly.
 
 ### Verified Stats
-- 65 levels extracted successfully (100% success rate)
+- 214 levels extracted successfully (65 base + 149 DLC, 100% success rate)
 - Example "100bills": 12 beatmaps (Standard 5 diffs + OneSaber + NoArrows + 360/90 Degree)
 - v4 format with gzip compression confirmed across all extracted levels
+- Total extracted audio: ~7.9 GB WAV
 
 ---
 
