@@ -720,3 +720,80 @@ SHA-1 over concatenation of `Info.dat` bytes + all difficulty `.dat` file bytes 
 | Hard | 12 |
 | Expert | 16 |
 | Expert+ | 18 |
+
+---
+
+## Training Data Quality Analysis
+
+Research conducted February 2026 to determine download criteria for BeatSaver custom maps.
+
+### BeatSaver Catalog Overview
+
+- **Total maps:** ~114,900
+- **Rating system:** Wilson score (0.0-1.0) computed from upvotes/downvotes
+- **Key stats fields:** `score`, `upvotes`, `downvotes` (also `plays`, `downloads` but these return 0)
+- **Automapper flag:** Boolean indicating AI-generated maps
+
+### Score Distribution (estimated from full catalog)
+
+| Min Score | Est. Maps | % of Total |
+|-----------|-----------|------------|
+| >= 0.50 | ~96,000 | 84% |
+| >= 0.60 | ~83,000 | 72% |
+| >= 0.65 | ~76,000 | 66% |
+| >= 0.70 | ~69,000 | 60% |
+| >= 0.75 | ~61,000 | 53% |
+| >= 0.80 | ~50,000 | 44% |
+| >= 0.85 | ~39,000 | 34% |
+| >= 0.90 | ~23,000 | 20% |
+| >= 0.95 | ~5,500 | 5% |
+
+Calibration points from rating-sorted page depth scan:
+- Rank 0: score 0.99, Rank 2,000: 0.962, Rank 10,000: 0.935
+- Rank 20,000: 0.909, Rank 40,000: 0.847, Rank 60,000: 0.756
+- Rank 80,000: 0.625, Rank 100,000: 0.472
+
+### Score vs Engagement Correlation (3,700-map sample)
+
+| Score Range | Median Upvotes | % with 10+ Upvotes | Interpretation |
+|-------------|---------------|---------------------|----------------|
+| 0.50 - 0.60 | 0 | 3.8% | Unrated/untested noise |
+| 0.60 - 0.70 | 2 | 13.3% | Low engagement |
+| 0.70 - 0.80 | 8 | 45.7% | Moderate quality |
+| 0.80 - 0.90 | 23 | 89.8% | Good quality |
+| 0.90+ | 91 | 100% | Excellent quality |
+
+The 0.50-0.60 score bucket is a "default/unrated" zone: maps with 0-1 votes receive a score around 0.5 from the Wilson score formula. These have no quality signal.
+
+### Upvotes Distribution (human-made maps)
+
+| Upvotes | % of Maps |
+|---------|-----------|
+| 0 | 19% |
+| 1-4 | 19% |
+| 5-10 | 13% |
+| 11-50 | 27% |
+| 51-250 | 14% |
+| 250+ | 8% |
+
+### Download Criteria Decision
+
+**Selected: score >= 0.75, upvotes >= 5, automapper = false**
+
+Rationale:
+- Filters out the unrated noise bucket (0.50-0.60 scores with zero engagement)
+- Yields ~55,000 maps (each with multiple difficulties = 100K+ training examples)
+- Large enough dataset for supervised pretraining
+- Can fine-tune later on premium tier (score >= 0.90, ~23K maps) for polish
+
+Three tiers defined for flexibility:
+
+| Tier | Criteria | Est. Maps | Use Case |
+|------|----------|-----------|----------|
+| Primary | score >= 0.75, upvotes >= 5 | ~55,000 | Main training set |
+| Strict | score >= 0.80, upvotes >= 10 | ~40,000 | Higher quality subset |
+| Premium | score >= 0.90 | ~23,000 | Fine-tuning / validation |
+
+Additional filters applied in processing (not download):
+- Standard characteristic only (exclude 360/90/OneSaber)
+- Must have at least one difficulty with color notes

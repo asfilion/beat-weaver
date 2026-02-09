@@ -12,6 +12,7 @@ def cmd_download(args: argparse.Namespace) -> None:
     downloaded = client.download_maps(
         dest_dir=Path(args.output),
         min_score=args.min_score,
+        min_upvotes=args.min_upvotes,
         max_maps=args.max_maps,
     )
     print(f"Downloaded {len(downloaded)} maps to {args.output}")
@@ -193,7 +194,10 @@ def main() -> None:
 
     # download
     dl = sub.add_parser("download", help="Download custom maps from BeatSaver")
-    dl.add_argument("--min-score", type=float, default=0.7)
+    dl.add_argument("--min-score", type=float, default=0.75,
+                     help="Minimum rating score 0.0-1.0 (default: 0.75)")
+    dl.add_argument("--min-upvotes", type=int, default=5,
+                     help="Minimum upvotes (default: 5)")
     dl.add_argument("--max-maps", type=int, default=100)
     dl.add_argument("--output", default="data/raw/beatsaver")
 
