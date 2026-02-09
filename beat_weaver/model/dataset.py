@@ -199,6 +199,10 @@ class BeatSaberDataset(Dataset):
             mel, sr=sr, hop_length=self.config.hop_length, bpm=bpm,
         )
 
+        # Truncate audio to max_audio_len to fit in VRAM
+        if mel.shape[1] > self.config.max_audio_len:
+            mel = mel[:, : self.config.max_audio_len]
+
         return (
             torch.from_numpy(mel),                          # (n_mels, T_audio)
             torch.tensor(token_ids, dtype=torch.long),      # (max_seq_len,)

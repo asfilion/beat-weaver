@@ -80,8 +80,11 @@ class Trainer:
         self.model.train()
         total_loss = 0.0
         n_batches = 0
+        accum_steps = self.config.gradient_accumulation_steps
 
-        for mel, mel_mask, tokens, token_mask in dataloader:
+        self.optimizer.zero_grad()
+
+        for batch_idx, (mel, mel_mask, tokens, token_mask) in enumerate(dataloader):
             mel = mel.to(self.device)
             mel_mask = mel_mask.to(self.device)
             tokens = tokens.to(self.device)
@@ -92,8 +95,6 @@ class Trainer:
             target_tokens = tokens[:, 1:]
             input_mask = token_mask[:, :-1]
 
-            self.optimizer.zero_grad()
-
             with torch.amp.autocast(device_type=self.device.type, enabled=self.device.type == "cuda"):
                 logits = self.model(mel, input_tokens, mel_mask, input_mask)
                 # logits: (batch, seq_len-1, vocab_size)
@@ -102,25 +103,29 @@ class Trainer:
                     logits.reshape(-1, logits.size(-1)),
                     target_tokens.reshape(-1),
                 )
+                loss = loss / accum_steps  # Scale for accumulation
 
             self.scaler.scale(loss).backward()
-            self.scaler.unscale_(self.optimizer)
-            nn.utils.clip_grad_norm_(
-                self.model.parameters(), self.config.gradient_clip_norm,
-            )
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
 
-            if hasattr(self, "scheduler"):
-                self.scheduler.step()
+            if (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(dataloader):
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.config.gradient_clip_norm,
+                )
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.optimizer.zero_grad()
 
-            total_loss += loss.item()
+                if hasattr(self, "scheduler"):
+                    self.scheduler.step()
+
+            total_loss += loss.item() * accum_steps  # Unscale for logging
             n_batches += 1
             self.global_step += 1
 
             # Log every 50 steps
             if self.global_step % 50 == 0:
-                self.writer.add_scalar("train/loss_step", loss.item(), self.global_step)
+                self.writer.add_scalar("train/loss_step", loss.item() * accum_steps, self.global_step)
                 lr = self.optimizer.param_groups[0]["lr"]
                 self.writer.add_scalar("train/lr", lr, self.global_step)
 

@@ -21,7 +21,6 @@ Compound note encoding: base + x * 27 + y * 9 + direction
 from __future__ import annotations
 
 import logging
-import warnings
 from dataclasses import dataclass
 
 from beat_weaver.schemas.normalized import Note, NormalizedBeatmap
@@ -169,17 +168,17 @@ def encode_beatmap(beatmap: NormalizedBeatmap) -> list[int]:
             for note in group_notes:
                 if note.color == 0:  # Red/Left
                     if left_note is not None:
-                        warnings.warn(
-                            f"Duplicate left note at beat {note.beat}, "
-                            f"keeping first"
+                        logger.debug(
+                            "Duplicate left note at beat %s, keeping first",
+                            note.beat,
                         )
                         continue
                     left_note = note
                 elif note.color == 1:  # Blue/Right
                     if right_note is not None:
-                        warnings.warn(
-                            f"Duplicate right note at beat {note.beat}, "
-                            f"keeping first"
+                        logger.debug(
+                            "Duplicate right note at beat %s, keeping first",
+                            note.beat,
                         )
                         continue
                     right_note = note
