@@ -32,6 +32,29 @@ def cmd_extract_official(args: argparse.Namespace) -> None:
     print(f"Extracted {len(extracted)} map folders to {args.output}")
 
 
+def cmd_build_manifest(args: argparse.Namespace) -> None:
+    from beat_weaver.model.audio import build_audio_manifest, save_manifest
+
+    raw_dirs = [Path(d) for d in args.input]
+    manifest = build_audio_manifest(raw_dirs)
+    save_manifest(manifest, Path(args.output))
+    print(f"Built audio manifest: {len(manifest)} entries -> {args.output}")
+
+
+def _detect_source(map_folder: Path, input_root: Path) -> str:
+    """Detect map source from its path relative to the input root."""
+    try:
+        rel = map_folder.relative_to(input_root)
+        parts = [p.lower() for p in rel.parts]
+    except ValueError:
+        parts = []
+    if "official" in parts:
+        return "official"
+    if "beatsaver" in parts:
+        return "beatsaver"
+    return "local_custom"
+
+
 def cmd_process(args: argparse.Namespace) -> None:
     from beat_weaver.pipeline.processor import process_map_folder
     from beat_weaver.storage.writer import write_parquet
@@ -42,8 +65,9 @@ def cmd_process(args: argparse.Namespace) -> None:
 
     for folder in sorted(input_dir.rglob("Info.dat")):
         map_folder = folder.parent
+        source = _detect_source(map_folder, input_dir)
         beatmaps = process_map_folder(
-            map_folder, source="raw", source_id=map_folder.name
+            map_folder, source=source, source_id=map_folder.name
         )
         all_beatmaps.extend(beatmaps)
 
@@ -209,6 +233,13 @@ def main() -> None:
     )
     ext.add_argument("--output", default="data/raw/official")
 
+    # build-manifest
+    bm = sub.add_parser("build-manifest", help="Build audio manifest from raw map folders")
+    bm.add_argument("--input", nargs="+", default=["data/raw"],
+                     help="Raw map directories to scan (default: data/raw)")
+    bm.add_argument("--output", default="data/audio_manifest.json",
+                     help="Output manifest JSON path")
+
     # process
     proc = sub.add_parser("process", help="Normalize raw maps into Parquet")
     proc.add_argument("--input", default="data/raw")
@@ -266,6 +297,7 @@ def main() -> None:
     commands = {
         "download": cmd_download,
         "extract-official": cmd_extract_official,
+        "build-manifest": cmd_build_manifest,
         "process": cmd_process,
         "run": cmd_run,
         "train": cmd_train,

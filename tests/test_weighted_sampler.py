@@ -1,5 +1,10 @@
 """Tests for dataset source weighting and WeightedRandomSampler construction."""
 
+import pytest
+
+pytest.importorskip("numpy")
+pytest.importorskip("torch")
+
 from unittest.mock import MagicMock
 
 from beat_weaver.model.dataset import build_weighted_sampler
