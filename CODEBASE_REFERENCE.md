@@ -7,7 +7,7 @@ Quick reference for the beat_weaver package structure, generated for AI context.
 ```
 beat_weaver/
 ├── __init__.py                          # "Beat Weaver - AI-powered Beat Saber track generator."
-├── cli.py                               # CLI: download, extract-official, process, run, train, generate, evaluate
+├── cli.py                               # CLI: download, extract-official, build-manifest, process, run, train, generate, evaluate
 ├── model/                               # ML model package (requires [ml] optional deps)
 │   ├── __init__.py
 │   ├── audio.py                         # Mel spectrogram extraction + beat-aligned framing + audio manifest
@@ -55,7 +55,7 @@ tests/
 ├── test_parsers.py                     # Info/beatmap parser tests (11 tests)
 ├── test_schemas.py                     # Schema & version parsing tests (16 tests)
 ├── test_tokenizer.py                   # Tokenizer encode/decode tests (26 tests)
-└── test_weighted_sampler.py            # Source weighting tests (9 tests)
+└── test_weighted_sampler.py            # Source weighting tests (9 tests, skipped without [ml])
 ```
 
 ## Core Dataclasses (`beat_weaver/schemas/normalized.py`)

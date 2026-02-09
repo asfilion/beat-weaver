@@ -98,7 +98,7 @@ See [LEARNINGS.md](LEARNINGS.md) for research details and [plans/](plans/) for i
 ## Tests
 
 ```bash
-# Run all tests (106 total; ML tests auto-skip without ML deps)
+# Run all tests (115 total; ML tests auto-skip without ML deps)
 python -m pytest tests/ -v
 ```
 
