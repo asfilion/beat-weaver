@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,95 @@ from beat_weaver.schemas.normalized import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_one_mel(
+    audio_path: str, song_hash: str, bpm: float, cache_path: str,
+    sr: int, n_mels: int, n_fft: int, hop_length: int,
+) -> str | None:
+    """Compute and cache one mel spectrogram. Returns song_hash on success, None on error."""
+    try:
+        audio, actual_sr = load_audio(Path(audio_path), sr=sr)
+        mel = compute_mel_spectrogram(
+            audio, sr=actual_sr, n_mels=n_mels, n_fft=n_fft, hop_length=hop_length,
+        )
+        mel = beat_align_spectrogram(mel, sr=actual_sr, hop_length=hop_length, bpm=bpm)
+        np.save(cache_path, mel)
+        return song_hash
+    except Exception as e:
+        logger.warning("Failed to compute mel for %s: %s", song_hash, e)
+        return None
+
+
+def warm_mel_cache(
+    processed_dir: Path,
+    audio_manifest_path: Path,
+    config: ModelConfig,
+    max_workers: int | None = None,
+) -> int:
+    """Pre-compute mel spectrograms in parallel for all songs in the manifest.
+
+    Skips songs that already have a cached mel file. Returns the number of
+    newly computed spectrograms.
+    """
+    cache_dir = processed_dir / "mel_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest = load_manifest(audio_manifest_path)
+
+    # Load BPMs from metadata
+    meta_path = processed_dir / "metadata.json"
+    with open(meta_path) as f:
+        raw_meta = json.load(f)
+    bpm_lookup: dict[str, float] = {}
+    if isinstance(raw_meta, list):
+        for m in raw_meta:
+            bpm_lookup[m["hash"]] = m["bpm"]
+    else:
+        for h, m in raw_meta.items():
+            bpm_lookup[h] = m["bpm"]
+
+    # Find songs that need mel computation
+    todo: list[tuple[str, str, float, str]] = []  # (audio_path, hash, bpm, cache_path)
+    for song_hash, audio_path in manifest.items():
+        bpm = bpm_lookup.get(song_hash)
+        if bpm is None:
+            continue
+        cache_path = str(cache_dir / f"{song_hash}_{bpm}.npy")
+        if not Path(cache_path).exists():
+            todo.append((str(audio_path), song_hash, bpm, cache_path))
+
+    if not todo:
+        logger.info("Mel cache is warm: all %d songs already cached", len(manifest))
+        return 0
+
+    logger.info(
+        "Warming mel cache: %d songs to compute (%d already cached)",
+        len(todo), len(manifest) - len(todo),
+    )
+
+    computed = 0
+    import os
+    if max_workers is None:
+        max_workers = min(os.cpu_count() or 4, 8)
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _compute_one_mel, audio_path, song_hash, bpm, cache_path,
+                config.sample_rate, config.n_mels, config.n_fft, config.hop_length,
+            ): song_hash
+            for audio_path, song_hash, bpm, cache_path in todo
+        }
+        for i, future in enumerate(as_completed(futures), 1):
+            result = future.result()
+            if result is not None:
+                computed += 1
+            if i % 500 == 0 or i == len(futures):
+                logger.info("Mel cache progress: %d/%d computed", i, len(futures))
+
+    logger.info("Mel cache warm: %d newly computed", computed)
+    return computed
 
 
 def _split_hashes(
@@ -119,8 +209,14 @@ class BeatSaberDataset(Dataset):
                 "score": meta.get("score"),
             })
 
+        # Free the large DataFrame and Arrow table now that samples are built
+        del df, table, grouped
+
         # Pre-tokenize all samples (deterministic — no need to repeat per epoch)
+        skipped_samples = 0
         for sample in self.samples:
+            # Filter out notes with coordinates outside the standard 4x3 grid
+            # (mapping extension maps can have x=1000, y=3000, etc.)
             notes = [
                 Note(
                     beat=n["beat"],
@@ -132,7 +228,13 @@ class BeatSaberDataset(Dataset):
                     angle_offset=n.get("angle_offset", 0),
                 )
                 for n in sample["notes"]
+                if 0 <= n["x"] < 4 and 0 <= n["y"] < 3
+                and 0 <= n["cut_direction"] < 9 and n["color"] in (0, 1)
             ]
+            if not notes:
+                skipped_samples += 1
+                sample["_skip"] = True
+                continue
             meta = self.metadata.get(sample["song_hash"], {})
             beatmap = NormalizedBeatmap(
                 metadata=SongMetadata(
@@ -161,6 +263,17 @@ class BeatSaberDataset(Dataset):
 
             sample["token_ids"] = token_ids
             sample["token_mask"] = mask
+
+        # Remove samples that had no valid notes after filtering
+        if skipped_samples > 0:
+            self.samples = [s for s in self.samples if not s.get("_skip")]
+            logger.warning(
+                "Filtered out %d samples with no standard-grid notes", skipped_samples,
+            )
+
+        # Free raw note dicts — only token_ids/token_mask are needed for training
+        for sample in self.samples:
+            sample.pop("notes", None)
 
         logger.info(
             "BeatSaberDataset(%s): %d samples from %d songs",

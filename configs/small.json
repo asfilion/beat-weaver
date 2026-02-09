@@ -14,7 +14,7 @@
   "decoder_dim": 128,
   "decoder_heads": 4,
   "decoder_ff_dim": 512,
-  "batch_size": 8,
+  "batch_size": 32,
   "learning_rate": 3e-4,
   "warmup_steps": 500,
   "max_epochs": 5,
