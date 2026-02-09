@@ -63,21 +63,42 @@ def _detect_source(map_folder: Path, input_root: Path) -> str:
     return "local_custom"
 
 
-def cmd_process(args: argparse.Namespace) -> None:
+def _process_single_folder(
+    map_folder: Path, source: str,
+) -> list:
+    """Process a single map folder (top-level for pickling by ProcessPoolExecutor)."""
     from beat_weaver.pipeline.processor import process_map_folder
+
+    return process_map_folder(map_folder, source=source, source_id=map_folder.name)
+
+
+def cmd_process(args: argparse.Namespace) -> None:
+    from concurrent.futures import ProcessPoolExecutor, as_completed
     from beat_weaver.storage.writer import write_parquet
 
     input_dir = Path(args.input)
     output_dir = Path(args.output)
-    all_beatmaps = []
 
-    for folder in sorted(input_dir.rglob("Info.dat")):
-        map_folder = folder.parent
+    # Collect all map folders up front
+    folders = []
+    for info_file in sorted(input_dir.rglob("Info.dat")):
+        map_folder = info_file.parent
         source = _detect_source(map_folder, input_dir)
-        beatmaps = process_map_folder(
-            map_folder, source=source, source_id=map_folder.name
-        )
-        all_beatmaps.extend(beatmaps)
+        folders.append((map_folder, source))
+
+    all_beatmaps = []
+    with ProcessPoolExecutor() as executor:
+        futures = {
+            executor.submit(_process_single_folder, folder, source): folder
+            for folder, source in folders
+        }
+        for future in as_completed(futures):
+            try:
+                all_beatmaps.extend(future.result())
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "Failed to process %s", futures[future], exc_info=True,
+                )
 
     write_parquet(all_beatmaps, output_dir)
     print(f"Processed {len(all_beatmaps)} beatmaps to {output_dir}")

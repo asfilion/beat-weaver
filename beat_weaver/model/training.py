@@ -226,22 +226,26 @@ def train(
         logger.info("Resumed from %s (epoch %d)", resume_from, trainer.epoch)
 
     sampler = build_weighted_sampler(train_dataset, config.official_ratio)
+    use_cuda = trainer.device.type == "cuda"
+    num_workers = 2 if use_cuda else 0
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
         shuffle=sampler is None,  # shuffle only when no weighted sampler
         sampler=sampler,
         collate_fn=collate_fn,
-        num_workers=0,  # audio loading not picklable
-        pin_memory=trainer.device.type == "cuda",
+        num_workers=num_workers,
+        pin_memory=use_cuda,
+        persistent_workers=num_workers > 0,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=config.batch_size,
         shuffle=False,
         collate_fn=collate_fn,
-        num_workers=0,
-        pin_memory=trainer.device.type == "cuda",
+        num_workers=num_workers,
+        pin_memory=use_cuda,
+        persistent_workers=num_workers > 0,
     )
 
     # Build scheduler after knowing steps_per_epoch

@@ -12,6 +12,7 @@ from pathlib import Path
 import librosa
 import numpy as np
 import soundfile as sf
+from scipy.interpolate import interp1d
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +99,11 @@ def beat_align_spectrogram(
     # Use linear interpolation across the time axis
     frame_indices = np.interp(sub_times, frame_times, np.arange(n_frames))
 
-    # Interpolate each mel bin
-    aligned = np.zeros((n_mels, total_subs), dtype=np.float32)
-    x_coords = np.arange(n_frames)
-    for i in range(n_mels):
-        aligned[i] = np.interp(frame_indices, x_coords, mel[i])
+    # Vectorized interpolation across all mel bins at once
+    x_coords = np.arange(n_frames, dtype=np.float64)
+    f = interp1d(x_coords, mel, axis=1, kind="linear",
+                 fill_value="extrapolate", assume_sorted=True)
+    aligned = f(frame_indices).astype(np.float32)
 
     return aligned
 

@@ -80,9 +80,43 @@ def write_parquet(beatmaps: list[NormalizedBeatmap], output_dir: Path) -> None:
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    note_rows: list[dict] = []
-    bomb_rows: list[dict] = []
-    obstacle_rows: list[dict] = []
+    # Columnar lists — avoids 900K+ dict allocations per column
+    n_hashes: list[str] = []
+    n_sources: list[str] = []
+    n_difficulties: list[str] = []
+    n_characteristics: list[str] = []
+    n_bpms: list[float] = []
+    n_beats: list[float] = []
+    n_times: list[float] = []
+    n_xs: list[int] = []
+    n_ys: list[int] = []
+    n_colors: list[int] = []
+    n_cut_dirs: list[int] = []
+    n_angles: list[int] = []
+
+    b_hashes: list[str] = []
+    b_sources: list[str] = []
+    b_difficulties: list[str] = []
+    b_characteristics: list[str] = []
+    b_bpms: list[float] = []
+    b_beats: list[float] = []
+    b_times: list[float] = []
+    b_xs: list[int] = []
+    b_ys: list[int] = []
+
+    o_hashes: list[str] = []
+    o_sources: list[str] = []
+    o_difficulties: list[str] = []
+    o_characteristics: list[str] = []
+    o_bpms: list[float] = []
+    o_beats: list[float] = []
+    o_times: list[float] = []
+    o_durations: list[float] = []
+    o_xs: list[int] = []
+    o_ys: list[int] = []
+    o_widths: list[int] = []
+    o_heights: list[int] = []
+
     # Deduplicate metadata by song hash.
     metadata_by_hash: dict[str, dict] = {}
 
@@ -98,57 +132,45 @@ def write_parquet(beatmaps: list[NormalizedBeatmap], output_dir: Path) -> None:
 
         # --- Notes ---
         for note in bm.notes:
-            note_rows.append(
-                {
-                    "song_hash": song_hash,
-                    "source": source,
-                    "difficulty": difficulty,
-                    "characteristic": characteristic,
-                    "bpm": bpm,
-                    "beat": note.beat,
-                    "time_seconds": note.time_seconds,
-                    "x": note.x,
-                    "y": note.y,
-                    "color": note.color,
-                    "cut_direction": note.cut_direction,
-                    "angle_offset": note.angle_offset,
-                }
-            )
+            n_hashes.append(song_hash)
+            n_sources.append(source)
+            n_difficulties.append(difficulty)
+            n_characteristics.append(characteristic)
+            n_bpms.append(bpm)
+            n_beats.append(note.beat)
+            n_times.append(note.time_seconds)
+            n_xs.append(note.x)
+            n_ys.append(note.y)
+            n_colors.append(note.color)
+            n_cut_dirs.append(note.cut_direction)
+            n_angles.append(note.angle_offset)
 
         # --- Bombs ---
         for bomb in bm.bombs:
-            bomb_rows.append(
-                {
-                    "song_hash": song_hash,
-                    "source": source,
-                    "difficulty": difficulty,
-                    "characteristic": characteristic,
-                    "bpm": bpm,
-                    "beat": bomb.beat,
-                    "time_seconds": bomb.time_seconds,
-                    "x": bomb.x,
-                    "y": bomb.y,
-                }
-            )
+            b_hashes.append(song_hash)
+            b_sources.append(source)
+            b_difficulties.append(difficulty)
+            b_characteristics.append(characteristic)
+            b_bpms.append(bpm)
+            b_beats.append(bomb.beat)
+            b_times.append(bomb.time_seconds)
+            b_xs.append(bomb.x)
+            b_ys.append(bomb.y)
 
         # --- Obstacles ---
         for obs in bm.obstacles:
-            obstacle_rows.append(
-                {
-                    "song_hash": song_hash,
-                    "source": source,
-                    "difficulty": difficulty,
-                    "characteristic": characteristic,
-                    "bpm": bpm,
-                    "beat": obs.beat,
-                    "time_seconds": obs.time_seconds,
-                    "duration_beats": obs.duration_beats,
-                    "x": obs.x,
-                    "y": obs.y,
-                    "width": obs.width,
-                    "height": obs.height,
-                }
-            )
+            o_hashes.append(song_hash)
+            o_sources.append(source)
+            o_difficulties.append(difficulty)
+            o_characteristics.append(characteristic)
+            o_bpms.append(bpm)
+            o_beats.append(obs.beat)
+            o_times.append(obs.time_seconds)
+            o_durations.append(obs.duration_beats)
+            o_xs.append(obs.x)
+            o_ys.append(obs.y)
+            o_widths.append(obs.width)
+            o_heights.append(obs.height)
 
         # --- Metadata (deduplicated by hash) ---
         if song_hash not in metadata_by_hash:
@@ -173,14 +195,40 @@ def write_parquet(beatmaps: list[NormalizedBeatmap], output_dir: Path) -> None:
             }
         )
 
-    # --- Write Parquet files ---
-    notes_table = pa.Table.from_pylist(note_rows, schema=NOTES_SCHEMA)
+    # --- Write Parquet files (from columnar lists, no dict overhead) ---
+    notes_table = pa.table(
+        {
+            "song_hash": n_hashes, "source": n_sources,
+            "difficulty": n_difficulties, "characteristic": n_characteristics,
+            "bpm": n_bpms, "beat": n_beats, "time_seconds": n_times,
+            "x": n_xs, "y": n_ys, "color": n_colors,
+            "cut_direction": n_cut_dirs, "angle_offset": n_angles,
+        },
+        schema=NOTES_SCHEMA,
+    )
     pq.write_table(notes_table, output_dir / "notes.parquet", compression="snappy")
 
-    bombs_table = pa.Table.from_pylist(bomb_rows, schema=BOMBS_SCHEMA)
+    bombs_table = pa.table(
+        {
+            "song_hash": b_hashes, "source": b_sources,
+            "difficulty": b_difficulties, "characteristic": b_characteristics,
+            "bpm": b_bpms, "beat": b_beats, "time_seconds": b_times,
+            "x": b_xs, "y": b_ys,
+        },
+        schema=BOMBS_SCHEMA,
+    )
     pq.write_table(bombs_table, output_dir / "bombs.parquet", compression="snappy")
 
-    obstacles_table = pa.Table.from_pylist(obstacle_rows, schema=OBSTACLES_SCHEMA)
+    obstacles_table = pa.table(
+        {
+            "song_hash": o_hashes, "source": o_sources,
+            "difficulty": o_difficulties, "characteristic": o_characteristics,
+            "bpm": o_bpms, "beat": o_beats, "time_seconds": o_times,
+            "duration_beats": o_durations, "x": o_xs, "y": o_ys,
+            "width": o_widths, "height": o_heights,
+        },
+        schema=OBSTACLES_SCHEMA,
+    )
     pq.write_table(
         obstacles_table, output_dir / "obstacles.parquet", compression="snappy"
     )
