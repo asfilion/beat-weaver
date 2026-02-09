@@ -83,10 +83,9 @@ class BeatSaberDataset(Dataset):
         self.mel_cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Load notes from Parquet using pandas groupby (vectorized)
-        import pyarrow.parquet as pq
+        from beat_weaver.storage.writer import read_notes_parquet
 
-        notes_path = self.processed_dir / "notes.parquet"
-        table = pq.read_table(notes_path)
+        table = read_notes_parquet(self.processed_dir)
         df = table.to_pandas()
 
         # Ensure angle_offset column exists

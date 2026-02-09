@@ -807,3 +807,29 @@ Three tiers defined for flexibility:
 Additional filters applied in processing (not download):
 - Standard characteristic only (exclude 360/90/OneSaber)
 - Must have at least one difficulty with color notes
+
+---
+
+## Parquet Storage Format
+
+### Row Group Strategy
+Notes, bombs, and obstacles are written to numbered Parquet files (`notes_0000.parquet`, `notes_0001.parquet`, etc.) with **one row group per song_hash**. This allows readers to push down predicates and skip irrelevant songs when loading a subset (e.g. only train-split hashes).
+
+### File Splitting
+When a Parquet file exceeds 1 GB (configurable via `max_file_bytes`), a new numbered file is started. This keeps individual files manageable for memory-mapped I/O and cloud storage. The reader (`read_notes_parquet`) transparently handles both:
+- **Multi-file layout:** `notes_0000.parquet`, `notes_0001.parquet`, ...
+- **Legacy single-file:** `notes.parquet` (backward compat)
+
+### Performance Profile (214 official songs, 907K notes)
+- Full table load: ~1s, ~100MB RAM (happens once at training start)
+- Current dataset fits in a single file (~5MB compressed)
+- Splitting becomes relevant at ~50K+ songs with millions of notes
+
+### Baseline Training Results (5 epochs, 214 official songs)
+
+| Config | Params | Epoch Time | Val Loss | Val Acc |
+|--------|--------|-----------|----------|---------|
+| Default (6L/512d) | 44.5M | ~456s | 2.7457 | 40.5% |
+| Small (2L/128d) | 1.0M | ~15s | 2.7379 | 41.5% |
+
+The small model matches the large model's quality on this dataset size, suggesting data volume (not model capacity) is the current bottleneck.

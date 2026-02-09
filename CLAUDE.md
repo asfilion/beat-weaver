@@ -55,15 +55,17 @@ Install: `pip install -e .` (core) or `pip install -e ".[ml]"` (with ML dependen
 - `beat_weaver.model.exporter` — token sequence → playable v2 map folder
 - `beat_weaver.model.evaluate` — onset F1, NPS accuracy, parity, diversity metrics
 
-**Output format:** `data/processed/notes.parquet` with columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset
+**Output format:** `data/processed/notes_NNNN.parquet` (one row group per song, split at 1 GB) with columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset. Reader (`read_notes_parquet`) handles both multi-file and legacy single-file layouts.
 
-**Tests:** `python -m pytest tests/ -v` (118 tests; ML tests skipped without `.[ml]` deps)
+**Model configs:** `configs/small.json` (1M params, ~15s/epoch) for fast iteration. Default config (44.5M params) for full training.
+
+**Tests:** `python -m pytest tests/ -v` (131 tests; ML tests skipped without `.[ml]` deps)
 
 ## ML Model
 
 See [LEARNINGS.md](LEARNINGS.md) for research details, [plans/002-ml-model.md](plans/002-ml-model.md) for implementation plan.
 
-- **Architecture:** Encoder-decoder transformer (~40M params at default config)
+- **Architecture:** Encoder-decoder transformer (44.5M params default, 1M params small config)
 - **Audio input:** Log-mel spectrogram (80 bins, sr=22050, hop=512), beat-aligned to 1/16th note grid
 - **Scope:** Color notes only (no bombs, walls, arcs, chains until core model performs well)
 - **Output:** Beat-quantized compound tokens (291 vocab) → v2 Beat Saber JSON

@@ -123,7 +123,16 @@ notes_table = pa.table({"song_hash": hashes, "beat": beats, ...}, schema=NOTES_S
 | `beat_weaver/model/training.py` | num_workers > 0 (#7) |
 | `beat_weaver/storage/writer.py` | Columnar building (#8) |
 
+## Post-Plan Addition: Parquet Row Group Partitioning
+
+Added after initial plan completion:
+- **Writer:** One row group per `song_hash`, numbered files (`notes_0000.parquet`), split at 1 GB
+- **Reader:** `read_notes_parquet()` handles multi-file and legacy single-file layouts
+- **Dataset:** Uses `read_notes_parquet()` instead of direct `pq.read_table()`
+- **Tests:** 13 new tests in `tests/test_writer.py`
+- **Small config:** `configs/small.json` (1M params, 15s/epoch vs 456s/epoch)
+
 ## Verification
 
-1. `python -m pytest tests/ -x -q` after each change — all 118 tests pass
+1. `python -m pytest tests/ -x -q` — all 131 tests pass (118 original + 13 new)
 2. Push to remote, verify CI passes (Python 3.11 + 3.12)
