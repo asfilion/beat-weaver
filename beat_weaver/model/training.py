@@ -246,6 +246,14 @@ def train(
 
     config.save(output_dir / "config.json")
 
+    training_start = time.time()
+    epoch_times: list[float] = []
+
+    logger.info(
+        "Training: %d train samples, %d val samples, %d batches/epoch, device=%s",
+        len(train_dataset), len(val_dataset), len(train_loader), trainer.device,
+    )
+
     for epoch in range(trainer.epoch, config.max_epochs):
         trainer.epoch = epoch
         t0 = time.time()
@@ -254,9 +262,12 @@ def train(
         val_metrics = trainer.validate(val_loader)
 
         elapsed = time.time() - t0
+        epoch_times.append(elapsed)
+        total_elapsed = time.time() - training_start
+
         logger.info(
-            "Epoch %d/%d (%.1fs): train_loss=%.4f val_loss=%.4f val_acc=%.4f",
-            epoch + 1, config.max_epochs, elapsed,
+            "Epoch %d/%d (%.1fs, total %.0fs): train_loss=%.4f val_loss=%.4f val_acc=%.4f",
+            epoch + 1, config.max_epochs, elapsed, total_elapsed,
             train_loss, val_metrics["val_loss"], val_metrics["val_token_accuracy"],
         )
 
@@ -264,6 +275,8 @@ def train(
         trainer.writer.add_scalar("train/loss_epoch", train_loss, epoch)
         trainer.writer.add_scalar("val/loss", val_metrics["val_loss"], epoch)
         trainer.writer.add_scalar("val/token_accuracy", val_metrics["val_token_accuracy"], epoch)
+        trainer.writer.add_scalar("timing/epoch_seconds", elapsed, epoch)
+        trainer.writer.add_scalar("timing/total_seconds", total_elapsed, epoch)
 
         # Checkpoint every epoch
         trainer.save_checkpoint(f"epoch_{epoch + 1:03d}")
@@ -281,4 +294,30 @@ def train(
                 break
 
     trainer.writer.close()
+
+    # Write training summary
+    total_time = time.time() - training_start
+    epochs_completed = len(epoch_times)
+    avg_epoch = sum(epoch_times) / max(1, epochs_completed)
+    summary = {
+        "train_samples": len(train_dataset),
+        "val_samples": len(val_dataset),
+        "batches_per_epoch": len(train_loader),
+        "batch_size": config.batch_size,
+        "epochs_completed": epochs_completed,
+        "total_time_seconds": round(total_time, 1),
+        "avg_epoch_seconds": round(avg_epoch, 1),
+        "samples_per_second": round(len(train_dataset) / avg_epoch, 1),
+        "best_val_loss": round(trainer.best_val_loss, 4),
+        "device": str(trainer.device),
+        "model_parameters": model.count_parameters(),
+    }
+    summary_path = output_dir / "training_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2))
+    logger.info(
+        "Training complete: %d epochs in %.0fs (avg %.1fs/epoch, %.1f samples/s)",
+        epochs_completed, total_time, avg_epoch,
+        len(train_dataset) / avg_epoch,
+    )
+
     return output_dir / "checkpoints" / "best"
