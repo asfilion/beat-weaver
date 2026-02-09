@@ -17,12 +17,12 @@
   "batch_size": 32,
   "learning_rate": 3e-4,
   "warmup_steps": 500,
-  "max_epochs": 23,
+  "max_epochs": 30,
   "dropout": 0.1,
   "label_smoothing": 0.1,
   "gradient_clip_norm": 1.0,
   "gradient_accumulation_steps": 1,
-  "early_stopping_patience": 100,
+  "early_stopping_patience": 10,
   "official_ratio": 0.2,
   "density_loss_weight": 0.1
 }
