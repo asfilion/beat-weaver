@@ -9,13 +9,20 @@ def cmd_download(args: argparse.Namespace) -> None:
     from beat_weaver.sources.beatsaver import BeatSaverClient
 
     client = BeatSaverClient()
+
+    # Count already-downloaded maps for the summary
+    dest = Path(args.output)
+    existing = sum(1 for d in dest.iterdir() if d.is_dir()) if dest.exists() else 0
+
     downloaded = client.download_maps(
-        dest_dir=Path(args.output),
+        dest_dir=dest,
         min_score=args.min_score,
         min_upvotes=args.min_upvotes,
         max_maps=args.max_maps,
     )
-    print(f"Downloaded {len(downloaded)} maps to {args.output}")
+    newly = len(downloaded) - existing if len(downloaded) > existing else len(downloaded)
+    limit = f" (limit: {args.max_maps})" if args.max_maps > 0 else " (no limit)"
+    print(f"Done: {len(downloaded)} maps in {args.output} ({newly} new){limit}")
 
 
 def cmd_extract_official(args: argparse.Namespace) -> None:
@@ -107,7 +114,7 @@ def cmd_train(args: argparse.Namespace) -> None:
 
 def cmd_generate(args: argparse.Namespace) -> None:
     import torch
-    from beat_weaver.model.audio import compute_mel_spectrogram, load_audio
+    from beat_weaver.model.audio import compute_mel_spectrogram, detect_bpm, load_audio
     from beat_weaver.model.config import ModelConfig
     from beat_weaver.model.exporter import export_map
     from beat_weaver.model.inference import generate
@@ -123,6 +130,12 @@ def cmd_generate(args: argparse.Namespace) -> None:
     model.eval()
 
     audio, sr = load_audio(Path(args.audio), sr=config.sample_rate)
+
+    bpm = args.bpm
+    if bpm is None:
+        bpm = detect_bpm(audio, sr=sr)
+        print(f"Auto-detected BPM: {bpm:.1f}")
+
     mel = compute_mel_spectrogram(audio, sr=sr, n_mels=config.n_mels,
                                   n_fft=config.n_fft, hop_length=config.hop_length)
     mel_tensor = torch.from_numpy(mel)
@@ -135,7 +148,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
 
     song_name = Path(args.audio).stem
     output = Path(args.output) if args.output else Path(f"output/{song_name}")
-    export_map(tokens, args.bpm, song_name, Path(args.audio), output, args.difficulty)
+    export_map(tokens, bpm, song_name, Path(args.audio), output, args.difficulty)
     print(f"Generated map: {output}")
 
 
@@ -222,7 +235,8 @@ def main() -> None:
                      help="Minimum rating score 0.0-1.0 (default: 0.75)")
     dl.add_argument("--min-upvotes", type=int, default=5,
                      help="Minimum upvotes (default: 5)")
-    dl.add_argument("--max-maps", type=int, default=100)
+    dl.add_argument("--max-maps", type=int, default=0,
+                     help="Max maps to download (default: 0 = unlimited)")
     dl.add_argument("--output", default="data/raw/beatsaver")
 
     # extract-official
@@ -277,7 +291,8 @@ def main() -> None:
     gen.add_argument("--difficulty", default="Expert",
                      choices=["Easy", "Normal", "Hard", "Expert", "ExpertPlus"])
     gen.add_argument("--output", default=None, help="Output map folder")
-    gen.add_argument("--bpm", type=float, required=True, help="Song BPM")
+    gen.add_argument("--bpm", type=float, default=None,
+                     help="Song BPM (auto-detected from audio if not provided)")
     gen.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature")
     gen.add_argument("--seed", type=int, default=None, help="Random seed")
 

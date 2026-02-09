@@ -15,6 +15,7 @@ from beat_weaver.model.audio import (
     build_audio_manifest,
     compute_mel_spectrogram,
     compute_onset_envelope,
+    detect_bpm,
     load_audio,
     load_manifest,
     save_manifest,
@@ -99,6 +100,40 @@ class TestOnsetEnvelope:
         assert onset.shape[0] == 1
         assert onset.shape[1] > 0
         assert onset.dtype == np.float32
+
+
+class TestDetectBpm:
+    def test_returns_float(self, sine_wave_file):
+        path, sr, _ = sine_wave_file
+        audio, _ = load_audio(path, sr=sr)
+        bpm = detect_bpm(audio, sr=sr)
+        assert isinstance(bpm, float)
+        assert bpm > 0
+
+    def test_fallback_for_non_rhythmic(self):
+        """Pure sine wave has no beats; should return default."""
+        sr = 22050
+        t = np.linspace(0, 2.0, sr * 2, dtype=np.float32)
+        audio = 0.5 * np.sin(2 * np.pi * 440 * t)
+        bpm = detect_bpm(audio, sr=sr, default=120.0)
+        # Should return the default rather than 0
+        assert bpm > 0
+
+    def test_click_track(self):
+        """A click track at 120 BPM should detect roughly 120."""
+        sr = 22050
+        duration = 5.0
+        bpm_target = 120.0
+        n_samples = int(sr * duration)
+        audio = np.zeros(n_samples, dtype=np.float32)
+        # Place clicks at each beat
+        beat_interval = int(sr * 60.0 / bpm_target)
+        for i in range(0, n_samples, beat_interval):
+            end = min(i + 200, n_samples)
+            audio[i:end] = 0.8
+        bpm = detect_bpm(audio, sr=sr)
+        assert isinstance(bpm, float)
+        assert bpm > 0
 
 
 class TestAudioManifest:

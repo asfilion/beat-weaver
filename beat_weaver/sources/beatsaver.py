@@ -120,26 +120,58 @@ class BeatSaverClient:
         dest_dir: Path,
         min_score: float = DEFAULT_MIN_SCORE,
         min_upvotes: int = DEFAULT_MIN_UPVOTES,
-        max_maps: int = 100,
+        max_maps: int = 0,
     ) -> list[Path]:
-        """Search and download maps, returning list of extracted directories."""
+        """Search and download maps, returning list of extracted directories.
+
+        Args:
+            dest_dir: Directory to extract maps into (each map gets its own subfolder).
+            min_score: Minimum BeatSaver rating score (0.0-1.0).
+            min_upvotes: Minimum number of upvotes.
+            max_maps: Maximum maps to download. 0 means unlimited (all qualifying maps).
+
+        Already-downloaded maps (detected by hash folder existence) are skipped
+        automatically, making this safe to resume after interruption.
+        """
         from tqdm import tqdm
 
         dest_dir.mkdir(parents=True, exist_ok=True)
         downloaded = []
+        skipped = 0
+        newly_downloaded = 0
 
-        with tqdm(total=max_maps, desc="Downloading maps") as pbar:
+        desc = "Downloading maps" if max_maps == 0 else f"Downloading maps (max {max_maps})"
+        pbar = tqdm(total=max_maps or None, desc=desc)
+
+        try:
             for map_info in self.search_maps(
                 min_score=min_score, min_upvotes=min_upvotes,
             ):
-                result = self.download_map(map_info, dest_dir)
-                if result is not None:
-                    downloaded.append(result)
+                map_hash = map_info["versions"][0]["hash"]
+                target_dir = dest_dir / map_hash
+
+                if target_dir.exists():
+                    skipped += 1
+                    downloaded.append(target_dir)
                     pbar.update(1)
+                    pbar.set_postfix(new=newly_downloaded, skipped=skipped)
+                else:
+                    result = self.download_map(map_info, dest_dir)
+                    if result is not None:
+                        newly_downloaded += 1
+                        downloaded.append(result)
+                        pbar.update(1)
+                        pbar.set_postfix(new=newly_downloaded, skipped=skipped)
 
-                if len(downloaded) >= max_maps:
+                if max_maps > 0 and len(downloaded) >= max_maps:
                     break
+        finally:
+            pbar.close()
 
+        logger.info(
+            "Download complete: %d total (%d new, %d already present)",
+            len(downloaded), newly_downloaded, skipped,
+        )
         return downloaded
 
 
