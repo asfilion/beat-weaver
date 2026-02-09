@@ -63,10 +63,12 @@ class BeatSaverClient:
                 total_found += 1
                 yield doc
 
-            total_pages = data.get("totalPages", 0) if "totalPages" in data else 0
+            info = data.get("info", {})
+            total_pages = info.get("pages", 0)
             page += 1
             logger.info(
-                "Fetched page %d, total maps found so far: %d", page, total_found
+                "Fetched page %d / %d, total maps found so far: %d",
+                page, total_pages, total_found,
             )
 
             # Stop if we've gone past the score threshold (results are
@@ -79,7 +81,7 @@ class BeatSaverClient:
                 )
                 break
 
-            if page >= total_pages:
+            if total_pages > 0 and page >= total_pages:
                 break
 
             time.sleep(REQUEST_DELAY)
