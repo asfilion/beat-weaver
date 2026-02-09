@@ -89,7 +89,10 @@ class BeatSaberDataset(Dataset):
         self.samples: list[dict] = []
         groups: dict[tuple[str, str, str], list[dict]] = {}
 
-        for i in range(len(notes_df["song_hash"])):
+        n_rows = len(notes_df["song_hash"])
+        angle_offsets = notes_df.get("angle_offset") or [0] * n_rows
+
+        for i in range(n_rows):
             key = (
                 notes_df["song_hash"][i],
                 notes_df["difficulty"][i],
@@ -104,7 +107,7 @@ class BeatSaberDataset(Dataset):
                 "y": notes_df["y"][i],
                 "color": notes_df["color"][i],
                 "cut_direction": notes_df["cut_direction"][i],
-                "angle_offset": notes_df.get("angle_offset", [0] * len(notes_df["beat"]))[i],
+                "angle_offset": angle_offsets[i],
                 "bpm": notes_df["bpm"][i],
             })
 
