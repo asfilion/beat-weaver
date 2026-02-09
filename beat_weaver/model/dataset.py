@@ -5,12 +5,12 @@ Produces (mel_spectrogram, token_ids, token_mask) tuples from Parquet data + aud
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import Dataset, WeightedRandomSampler
 
@@ -78,45 +78,37 @@ class BeatSaberDataset(Dataset):
         else:
             self.metadata = raw_meta
 
-        # Load notes from Parquet
+        # Mel spectrogram cache directory
+        self.mel_cache_dir = self.processed_dir / "mel_cache"
+        self.mel_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load notes from Parquet using pandas groupby (vectorized)
         import pyarrow.parquet as pq
 
         notes_path = self.processed_dir / "notes.parquet"
-        self.notes_table = pq.read_table(notes_path)
-        notes_df = self.notes_table.to_pydict()
+        table = pq.read_table(notes_path)
+        df = table.to_pandas()
+
+        # Ensure angle_offset column exists
+        if "angle_offset" not in df.columns:
+            df["angle_offset"] = 0
 
         # Group notes by (song_hash, difficulty, characteristic)
         self.samples: list[dict] = []
-        groups: dict[tuple[str, str, str], list[dict]] = {}
+        note_cols = ["beat", "time_seconds", "x", "y", "color",
+                     "cut_direction", "angle_offset", "bpm"]
+        grouped = df.groupby(["song_hash", "difficulty", "characteristic"])
 
-        for i in range(len(notes_df["song_hash"])):
-            key = (
-                notes_df["song_hash"][i],
-                notes_df["difficulty"][i],
-                notes_df["characteristic"][i],
-            )
-            if key not in groups:
-                groups[key] = []
-            groups[key].append({
-                "beat": notes_df["beat"][i],
-                "time_seconds": notes_df["time_seconds"][i],
-                "x": notes_df["x"][i],
-                "y": notes_df["y"][i],
-                "color": notes_df["color"][i],
-                "cut_direction": notes_df["cut_direction"][i],
-                "angle_offset": notes_df.get("angle_offset", [0] * len(notes_df["beat"]))[i],
-                "bpm": notes_df["bpm"][i],
-            })
-
-        # Filter by split (split by song_hash)
-        all_hashes = sorted({k[0] for k in groups})
+        # Collect all unique hashes for splitting
+        all_hashes = sorted(df["song_hash"].unique())
         split_hashes = set(_split_hashes(all_hashes, split))
 
-        for (song_hash, difficulty, characteristic), note_dicts in groups.items():
+        for (song_hash, difficulty, characteristic), group in grouped:
             if song_hash not in split_hashes:
                 continue
             if song_hash not in self.audio_manifest:
                 continue
+            note_dicts = group[note_cols].to_dict("records")
             meta = self.metadata.get(song_hash, {})
             self.samples.append({
                 "song_hash": song_hash,
@@ -127,6 +119,49 @@ class BeatSaberDataset(Dataset):
                 "source": meta.get("source", "unknown"),
                 "score": meta.get("score"),
             })
+
+        # Pre-tokenize all samples (deterministic — no need to repeat per epoch)
+        for sample in self.samples:
+            notes = [
+                Note(
+                    beat=n["beat"],
+                    time_seconds=n["time_seconds"],
+                    x=n["x"],
+                    y=n["y"],
+                    color=n["color"],
+                    cut_direction=n["cut_direction"],
+                    angle_offset=n.get("angle_offset", 0),
+                )
+                for n in sample["notes"]
+            ]
+            meta = self.metadata.get(sample["song_hash"], {})
+            beatmap = NormalizedBeatmap(
+                metadata=SongMetadata(
+                    source=meta.get("source", "unknown"),
+                    source_id=meta.get("source_id", sample["song_hash"]),
+                    hash=sample["song_hash"],
+                    bpm=sample["bpm"],
+                ),
+                difficulty_info=DifficultyInfo(
+                    characteristic=sample["characteristic"],
+                    difficulty=sample["difficulty"],
+                    difficulty_rank=0,
+                    note_jump_speed=0.0,
+                    note_jump_offset=0.0,
+                ),
+                notes=notes,
+            )
+            token_ids = encode_beatmap(beatmap)
+
+            # Truncate or pad tokens
+            max_len = self.config.max_seq_len
+            if len(token_ids) > max_len:
+                token_ids = token_ids[:max_len]
+            mask = [True] * len(token_ids) + [False] * (max_len - len(token_ids))
+            token_ids = token_ids + [0] * (max_len - len(token_ids))
+
+            sample["token_ids"] = token_ids
+            sample["token_mask"] = mask
 
         logger.info(
             "BeatSaberDataset(%s): %d samples from %d songs",
@@ -141,60 +176,31 @@ class BeatSaberDataset(Dataset):
         song_hash = sample["song_hash"]
         bpm = sample["bpm"]
 
-        # Reconstruct NormalizedBeatmap
-        notes = [
-            Note(
-                beat=n["beat"],
-                time_seconds=n["time_seconds"],
-                x=n["x"],
-                y=n["y"],
-                color=n["color"],
-                cut_direction=n["cut_direction"],
-                angle_offset=n.get("angle_offset", 0),
+        # Use pre-computed tokens
+        token_ids = sample["token_ids"]
+        mask = sample["token_mask"]
+
+        # Load mel spectrogram from cache or compute and cache
+        cache_path = self.mel_cache_dir / f"{song_hash}_{bpm}.npy"
+        if cache_path.exists():
+            mel = np.load(cache_path)
+        else:
+            audio_path = self.audio_manifest[song_hash]
+            audio, sr = load_audio(Path(audio_path), sr=self.config.sample_rate)
+            mel = compute_mel_spectrogram(
+                audio, sr=sr,
+                n_mels=self.config.n_mels,
+                n_fft=self.config.n_fft,
+                hop_length=self.config.hop_length,
             )
-            for n in sample["notes"]
-        ]
+            mel = beat_align_spectrogram(
+                mel, sr=sr, hop_length=self.config.hop_length, bpm=bpm,
+            )
+            np.save(cache_path, mel)
 
-        meta = self.metadata.get(song_hash, {})
-        beatmap = NormalizedBeatmap(
-            metadata=SongMetadata(
-                source=meta.get("source", "unknown"),
-                source_id=meta.get("source_id", song_hash),
-                hash=song_hash,
-                bpm=bpm,
-            ),
-            difficulty_info=DifficultyInfo(
-                characteristic=sample["characteristic"],
-                difficulty=sample["difficulty"],
-                difficulty_rank=0,
-                note_jump_speed=0.0,
-                note_jump_offset=0.0,
-            ),
-            notes=notes,
-        )
-
-        # Tokenize
-        token_ids = encode_beatmap(beatmap)
-
-        # Truncate or pad tokens
-        max_len = self.config.max_seq_len
-        if len(token_ids) > max_len:
-            token_ids = token_ids[:max_len]
-        mask = [True] * len(token_ids) + [False] * (max_len - len(token_ids))
-        token_ids = token_ids + [0] * (max_len - len(token_ids))
-
-        # Load and process audio
-        audio_path = self.audio_manifest[song_hash]
-        audio, sr = load_audio(Path(audio_path), sr=self.config.sample_rate)
-        mel = compute_mel_spectrogram(
-            audio, sr=sr,
-            n_mels=self.config.n_mels,
-            n_fft=self.config.n_fft,
-            hop_length=self.config.hop_length,
-        )
-        mel = beat_align_spectrogram(
-            mel, sr=sr, hop_length=self.config.hop_length, bpm=bpm,
-        )
+        # Truncate audio to max_audio_len to fit in VRAM
+        if mel.shape[1] > self.config.max_audio_len:
+            mel = mel[:, : self.config.max_audio_len]
 
         return (
             torch.from_numpy(mel),                          # (n_mels, T_audio)

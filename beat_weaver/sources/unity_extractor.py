@@ -481,23 +481,35 @@ def extract_official_maps(
         len(list(bundles_dir.glob("*_pack_assets_all_*.bundle"))),
     )
 
+    # Pre-build case-insensitive metadata lookup
+    meta_lookup: dict[str, dict] = {
+        pid.lower(): pmeta for pid, pmeta in pack_metadata.items()
+    }
+
     extracted: list[Path] = []
 
-    for bundle_path in level_bundles:
-        level_id = bundle_path.name
-        # Match to pack metadata (case-insensitive).
-        meta = None
-        for pid, pmeta in pack_metadata.items():
-            if pid.lower() == level_id.lower():
-                meta = pmeta
-                break
+    from concurrent.futures import ProcessPoolExecutor, as_completed
 
-        result = _extract_level_bundle(bundle_path, meta, output_dir)
-        if result is not None:
-            extracted.append(result)
-            logger.debug("Extracted: %s", level_id)
-        else:
-            logger.warning("Skipped: %s", level_id)
+    with ProcessPoolExecutor() as executor:
+        futures = {}
+        for bundle_path in level_bundles:
+            level_id = bundle_path.name
+            meta = meta_lookup.get(level_id.lower())
+            futures[executor.submit(
+                _extract_level_bundle, bundle_path, meta, output_dir,
+            )] = level_id
+
+        for future in as_completed(futures):
+            level_id = futures[future]
+            try:
+                result = future.result()
+                if result is not None:
+                    extracted.append(result)
+                    logger.debug("Extracted: %s", level_id)
+                else:
+                    logger.warning("Skipped: %s", level_id)
+            except Exception:
+                logger.warning("Failed: %s", level_id, exc_info=True)
 
     logger.info(
         "Extracted %d / %d level bundles (BeatmapLevelsData + DLC)",

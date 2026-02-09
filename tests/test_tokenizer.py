@@ -1,6 +1,6 @@
 """Tests for the Beat Saber map tokenizer."""
 
-import warnings
+import logging
 
 import pytest
 
@@ -185,18 +185,16 @@ class TestEncodeBeatmap:
         bar_count = sum(1 for t in tokens if t == BAR)
         assert bar_count == 2  # bar 0 and bar 1
 
-    def test_duplicate_same_hand_warns(self):
-        """Two left notes at same beat should warn and keep first."""
+    def test_duplicate_same_hand_logs(self, caplog):
+        """Two left notes at same beat should log debug and keep first."""
         notes = [
             Note(beat=0.0, time_seconds=0.0, x=0, y=0, color=0, cut_direction=0),
             Note(beat=0.0, time_seconds=0.0, x=1, y=1, color=0, cut_direction=1),
         ]
         bm = _make_beatmap("Expert", notes)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with caplog.at_level(logging.DEBUG, logger="beat_weaver.model.tokenizer"):
             tokens = encode_beatmap(bm)
-            assert len(w) == 1
-            assert "Duplicate left note" in str(w[0].message)
+        assert any("Duplicate left note" in msg for msg in caplog.messages)
 
 
 class TestDecodeTokens:

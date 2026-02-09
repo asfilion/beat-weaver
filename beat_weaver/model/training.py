@@ -80,8 +80,11 @@ class Trainer:
         self.model.train()
         total_loss = 0.0
         n_batches = 0
+        accum_steps = self.config.gradient_accumulation_steps
 
-        for mel, mel_mask, tokens, token_mask in dataloader:
+        self.optimizer.zero_grad()
+
+        for batch_idx, (mel, mel_mask, tokens, token_mask) in enumerate(dataloader):
             mel = mel.to(self.device)
             mel_mask = mel_mask.to(self.device)
             tokens = tokens.to(self.device)
@@ -92,8 +95,6 @@ class Trainer:
             target_tokens = tokens[:, 1:]
             input_mask = token_mask[:, :-1]
 
-            self.optimizer.zero_grad()
-
             with torch.amp.autocast(device_type=self.device.type, enabled=self.device.type == "cuda"):
                 logits = self.model(mel, input_tokens, mel_mask, input_mask)
                 # logits: (batch, seq_len-1, vocab_size)
@@ -102,25 +103,29 @@ class Trainer:
                     logits.reshape(-1, logits.size(-1)),
                     target_tokens.reshape(-1),
                 )
+                loss = loss / accum_steps  # Scale for accumulation
 
             self.scaler.scale(loss).backward()
-            self.scaler.unscale_(self.optimizer)
-            nn.utils.clip_grad_norm_(
-                self.model.parameters(), self.config.gradient_clip_norm,
-            )
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
 
-            if hasattr(self, "scheduler"):
-                self.scheduler.step()
+            if (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(dataloader):
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.config.gradient_clip_norm,
+                )
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.optimizer.zero_grad()
 
-            total_loss += loss.item()
+                if hasattr(self, "scheduler"):
+                    self.scheduler.step()
+
+            total_loss += loss.item() * accum_steps  # Unscale for logging
             n_batches += 1
             self.global_step += 1
 
             # Log every 50 steps
             if self.global_step % 50 == 0:
-                self.writer.add_scalar("train/loss_step", loss.item(), self.global_step)
+                self.writer.add_scalar("train/loss_step", loss.item() * accum_steps, self.global_step)
                 lr = self.optimizer.param_groups[0]["lr"]
                 self.writer.add_scalar("train/lr", lr, self.global_step)
 
@@ -221,22 +226,26 @@ def train(
         logger.info("Resumed from %s (epoch %d)", resume_from, trainer.epoch)
 
     sampler = build_weighted_sampler(train_dataset, config.official_ratio)
+    use_cuda = trainer.device.type == "cuda"
+    num_workers = 2 if use_cuda else 0
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
         shuffle=sampler is None,  # shuffle only when no weighted sampler
         sampler=sampler,
         collate_fn=collate_fn,
-        num_workers=0,  # audio loading not picklable
-        pin_memory=trainer.device.type == "cuda",
+        num_workers=num_workers,
+        pin_memory=use_cuda,
+        persistent_workers=num_workers > 0,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=config.batch_size,
         shuffle=False,
         collate_fn=collate_fn,
-        num_workers=0,
-        pin_memory=trainer.device.type == "cuda",
+        num_workers=num_workers,
+        pin_memory=use_cuda,
+        persistent_workers=num_workers > 0,
     )
 
     # Build scheduler after knowing steps_per_epoch
@@ -246,6 +255,14 @@ def train(
 
     config.save(output_dir / "config.json")
 
+    training_start = time.time()
+    epoch_times: list[float] = []
+
+    logger.info(
+        "Training: %d train samples, %d val samples, %d batches/epoch, device=%s",
+        len(train_dataset), len(val_dataset), len(train_loader), trainer.device,
+    )
+
     for epoch in range(trainer.epoch, config.max_epochs):
         trainer.epoch = epoch
         t0 = time.time()
@@ -254,9 +271,12 @@ def train(
         val_metrics = trainer.validate(val_loader)
 
         elapsed = time.time() - t0
+        epoch_times.append(elapsed)
+        total_elapsed = time.time() - training_start
+
         logger.info(
-            "Epoch %d/%d (%.1fs): train_loss=%.4f val_loss=%.4f val_acc=%.4f",
-            epoch + 1, config.max_epochs, elapsed,
+            "Epoch %d/%d (%.1fs, total %.0fs): train_loss=%.4f val_loss=%.4f val_acc=%.4f",
+            epoch + 1, config.max_epochs, elapsed, total_elapsed,
             train_loss, val_metrics["val_loss"], val_metrics["val_token_accuracy"],
         )
 
@@ -264,6 +284,8 @@ def train(
         trainer.writer.add_scalar("train/loss_epoch", train_loss, epoch)
         trainer.writer.add_scalar("val/loss", val_metrics["val_loss"], epoch)
         trainer.writer.add_scalar("val/token_accuracy", val_metrics["val_token_accuracy"], epoch)
+        trainer.writer.add_scalar("timing/epoch_seconds", elapsed, epoch)
+        trainer.writer.add_scalar("timing/total_seconds", total_elapsed, epoch)
 
         # Checkpoint every epoch
         trainer.save_checkpoint(f"epoch_{epoch + 1:03d}")
@@ -281,4 +303,30 @@ def train(
                 break
 
     trainer.writer.close()
+
+    # Write training summary
+    total_time = time.time() - training_start
+    epochs_completed = len(epoch_times)
+    avg_epoch = sum(epoch_times) / max(1, epochs_completed)
+    summary = {
+        "train_samples": len(train_dataset),
+        "val_samples": len(val_dataset),
+        "batches_per_epoch": len(train_loader),
+        "batch_size": config.batch_size,
+        "epochs_completed": epochs_completed,
+        "total_time_seconds": round(total_time, 1),
+        "avg_epoch_seconds": round(avg_epoch, 1),
+        "samples_per_second": round(len(train_dataset) / avg_epoch, 1),
+        "best_val_loss": round(trainer.best_val_loss, 4),
+        "device": str(trainer.device),
+        "model_parameters": model.count_parameters(),
+    }
+    summary_path = output_dir / "training_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2))
+    logger.info(
+        "Training complete: %d epochs in %.0fs (avg %.1fs/epoch, %.1f samples/s)",
+        epochs_completed, total_time, avg_epoch,
+        len(train_dataset) / avg_epoch,
+    )
+
     return output_dir / "checkpoints" / "best"
