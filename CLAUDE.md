@@ -10,7 +10,8 @@ Given an audio file as input, the system generates block positions and orientati
 
 1. **Data Pipeline** (complete) — Extract, parse, normalize Beat Saber maps into Parquet
 2. **ML Model** (complete) — Encoder-decoder transformer for audio → token sequence generation
-3. **Feedback System** (future) — In-game mechanism for player feedback to improve the model
+3. **Baseline Training** (complete) — 13 epochs on 23K songs, 60.6% token accuracy, generates playable maps
+4. **Feedback System** (future) — In-game mechanism for player feedback to improve the model
 
 ## Beat Saber Map Format Quick Reference
 
@@ -57,9 +58,11 @@ Install: `pip install -e .` (core) or `pip install -e ".[ml]"` (with ML dependen
 
 **Output format:** `data/processed/notes_NNNN.parquet` (one row group per song, split at 1 GB) with columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset. Reader (`read_notes_parquet`) handles both multi-file and legacy single-file layouts.
 
-**Model configs:** `configs/small.json` (1M params, ~15s/epoch) for fast iteration. Default config (44.5M params) for full training.
+**Model configs:** `configs/small.json` (1M params, batch_size=32, ~10min/epoch on full dataset) for fast iteration. Default config (44.5M params) for full training.
 
 **Tests:** `python -m pytest tests/ -v` (131 tests; ML tests skipped without `.[ml]` deps)
+
+**Training data:** 23,588 songs (23,375 BeatSaver + 213 official), 42,542 training samples, 40.3M notes total. Mel spectrograms pre-cached to `data/processed/mel_cache/` (~23K `.npy` files, ~30GB).
 
 ## ML Model
 
@@ -71,11 +74,20 @@ See [LEARNINGS.md](LEARNINGS.md) for research details, [plans/002-ml-model.md](p
 - **Output:** Beat-quantized compound tokens (291 vocab) → v2 Beat Saber JSON
 - **Token format:** `START DIFF BAR POS LEFT RIGHT ... BAR ... END`
 - **Training:** Cross-entropy with label smoothing, AdamW + cosine LR, mixed-precision, early stopping, weighted sampling (official 20% of batch, custom weighted by score)
-- **Inference:** Autoregressive with grammar-constrained decoding, temperature/top-k/top-p sampling
+- **Inference:** Autoregressive with grammar-constrained decoding (strictly increasing POS per bar), temperature/top-k/top-p sampling
 - **Evaluation:** Onset F1, parity violation rate, NPS accuracy, beat alignment, pattern diversity
+- **Mel pre-caching:** `warm_mel_cache()` computes all spectrograms in parallel before training starts (ProcessPoolExecutor, ~25min for 14K songs)
+- **Data filtering:** Out-of-grid notes (mapping extensions) filtered during pre-tokenization; difficulty names case-insensitive with `Expert+` alias
+
+## Baseline Training Results (small config, 23K songs)
+
+Best model after 13 epochs: **val_loss=2.055, 60.6% token accuracy**. Generates playable maps in-game. Known issues: color imbalance (skews red), NPS sometimes too high/low. Training diverged at epoch 14 due to LR scheduler restart on resume (NaN loss) — see learnings about cosine LR + resume.
 
 ## Open Questions
 
-- **Windowed evaluation:** Score individual segments rather than whole tracks for finer training signal
+- **LR scheduler persistence:** Save/restore scheduler state in checkpoints to avoid NaN on resume
+- **Larger model:** Try 4-layer/256d (~10M params) now that data pipeline is proven at scale
+- **Color balance:** Model generates ~70% red notes; may need loss weighting or data augmentation
+- **Full-song generation:** Audio truncated to max_audio_len=4096 frames (~95s at 22050Hz/512hop); need windowed generation for full songs
 - **Feedback capture system:** In-game mechanism to collect player feedback (later phase)
 - **RL fine-tuning:** After supervised pretraining, fine-tune with player feedback reward model

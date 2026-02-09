@@ -132,6 +132,25 @@ Added after initial plan completion:
 - **Tests:** 13 new tests in `tests/test_writer.py`
 - **Small config:** `configs/small.json` (1M params, 15s/epoch vs 456s/epoch)
 
+## Status: COMPLETE
+
+All 8 changes implemented and verified. Additional work done during baseline training run:
+
+### Additional Fixes (discovered during full-dataset training)
+- **v3 parser compact format:** `.get()` defaults for v3.3.0 maps that omit default-value keys
+- **int8 overflow:** `_clamp8()` for mapping extension coordinates (x=1000, y=3000)
+- **Difficulty aliases:** Case-insensitive matching + `Expert+` alias in tokenizer
+- **Out-of-grid filtering:** Notes outside standard 4x3 grid filtered during pre-tokenization
+- **Mel pre-caching:** `warm_mel_cache()` with ProcessPoolExecutor (~500 songs/min, 14x faster)
+- **Memory optimization:** Free raw note dicts after tokenization, explicit DataFrame cleanup
+- **Grammar constraint:** Strictly increasing POS in bars prevents duplicate same-beat notes
+- **Audio truncation:** `cmd_generate` truncates mel to max_audio_len before inference
+
+### Full-Dataset Training Results
+- 23K songs, 42K training samples, 1M param model, batch_size=32
+- Best val_loss=2.055, 60.6% accuracy after 13 epochs (~2 hours)
+- Generates playable in-game maps
+
 ## Verification
 
 1. `python -m pytest tests/ -x -q` — all 131 tests pass (118 original + 13 new)
