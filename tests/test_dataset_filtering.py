@@ -208,3 +208,26 @@ class TestCacheVersioning:
         config1 = ModelConfig()
         config2 = ModelConfig()
         assert _cache_version_key(config1) == _cache_version_key(config2)
+
+    def test_legacy_cache_cleared(self, tmp_path):
+        """Cache without VERSION file is cleared when npy files exist."""
+        from beat_weaver.model.dataset import warm_mel_cache
+
+        cache_dir = tmp_path / "mel_cache"
+        cache_dir.mkdir()
+        # Create a fake stale .npy file (no VERSION file)
+        (cache_dir / "abc_120.0.npy").write_bytes(b"stale")
+
+        # Create minimal manifest and metadata
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text("{}")
+        meta_path = tmp_path / "metadata.json"
+        meta_path.write_text("[]")
+
+        config = ModelConfig(use_onset_features=True)
+        warm_mel_cache(tmp_path, manifest_path, config)
+
+        # Stale file should be deleted
+        assert not (cache_dir / "abc_120.0.npy").exists()
+        # VERSION file should exist now
+        assert (cache_dir / "VERSION").exists()

@@ -82,16 +82,24 @@ def warm_mel_cache(
     # Check cache version — invalidate if feature config changed
     version_file = cache_dir / "VERSION"
     expected_version = _cache_version_key(config)
+    needs_clear = False
     if version_file.exists():
         current_version = version_file.read_text().strip()
         if current_version != expected_version:
-            logger.warning(
-                "Mel cache version mismatch (have %s, need %s). "
-                "Clearing cache and recomputing.",
-                current_version, expected_version,
-            )
-            for npy_file in cache_dir.glob("*.npy"):
-                npy_file.unlink()
+            needs_clear = True
+    else:
+        # No VERSION file but cache files exist — legacy cache, must clear
+        if any(cache_dir.glob("*.npy")):
+            needs_clear = True
+    if needs_clear:
+        n_stale = sum(1 for _ in cache_dir.glob("*.npy"))
+        logger.warning(
+            "Mel cache version mismatch (need %s). "
+            "Clearing %d stale files and recomputing.",
+            expected_version, n_stale,
+        )
+        for npy_file in cache_dir.glob("*.npy"):
+            npy_file.unlink()
     version_file.write_text(expected_version)
 
     manifest = load_manifest(audio_manifest_path)
