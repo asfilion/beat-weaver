@@ -45,6 +45,17 @@ This document is the project's curated knowledge base, capturing research findin
 - [Evaluation and Quality Metrics](#evaluation-and-quality-metrics) — Playability heuristics, rhythm alignment, flow, training losses
 - [Map Export](#map-export) — Writing playable v2 custom maps, audio requirements, packaging
 
+### Model Improvement Research (Post-Baseline)
+- [Dataset Composition Analysis](#dataset-composition-analysis) — Difficulty/source/characteristic distribution, token lengths
+- [Critical Finding: Token Truncation](#critical-finding-token-truncation) — 93% of Expert+ maps truncated at seq_len=1024
+- [Critical Finding: Quality Weighting is Broken](#critical-finding-quality-weighting-is-broken) — BeatSaver scores not persisted
+- [Model Scaling Research](#model-scaling-research) — Chinchilla scaling laws, Yi et al. optimal config
+- [Architecture Research](#architecture-research) — RoPE, Conformer encoder, onset features
+- [Training Technique Research](#training-technique-research) — SpecAugment, color balance loss, curriculum
+- [Prior Art Survey](#prior-art-survey) — DDC, DeepSaber, InfernoSaber, Mapperatorinator, osuT5
+- [Hardware Constraints](#hardware-constraints-rtx-4070-8gb-vram-32gb-ram) — What's feasible on 4070 vs better hardware
+- [Prioritized Improvement Roadmap](#prioritized-improvement-roadmap) — Tier 1/2/3 recommendations
+
 ---
 
 ## File Format Overview
@@ -943,3 +954,131 @@ Generated "Boom Kitty - Bassgasm" on Expert difficulty:
 - Playable in-game — verified by user
 - **Issues:** Color imbalance (77% red, 23% blue), audio truncated to ~95s (max_audio_len=4096)
 - **Strengths:** Uses full grid, correct note structure, reasonable difficulty spread
+
+---
+
+## Model Improvement Research (Post-Baseline)
+
+Research conducted after baseline training plateaued at val_loss=2.055 / 60.6% accuracy with 1M param model. Covers dataset analysis, scaling, architecture, training techniques, and prior art.
+
+### Dataset Composition Analysis
+
+Full analysis of the 53K-sample training dataset:
+
+**Source distribution:** 97.3% BeatSaver community maps, 2.7% official (214 songs producing 1,419 samples at ~6.6 difficulties/song). Weighted sampler targets 20% official per batch.
+
+**Difficulty distribution:**
+
+| Difficulty | Samples | % of data | Median tokens |
+|-----------|---------|-----------|---------------|
+| Easy | 3,785 | 7.1% | 805 |
+| Normal | 5,399 | 10.1% | 1,120 |
+| Hard | 10,286 | 19.3% | 1,507 |
+| Expert | 15,426 | 28.9% | 1,915 |
+| ExpertPlus | 18,450 | 34.6% | 2,323 |
+
+Expert + ExpertPlus = 63.5% of data (33,876 samples from ~22K songs).
+
+**Characteristics:** 94.2% Standard. Non-Standard modes (OneSaber, 360Degree, NoArrows, etc.) total 5.8% and have fundamentally different gameplay patterns — training on them alongside Standard adds noise.
+
+**Song stats:** Median duration 3.1 min, median BPM 143, median 680 notes/sample. 91 songs with BPM > 300 (degenerate beat alignment).
+
+### Critical Finding: Token Truncation
+
+**The single biggest data quality issue.** At `max_seq_len=1024` (small config), only 17.9% of all samples fit without truncation. For Expert/ExpertPlus:
+
+| max_seq_len | % Expert/EP that fit completely |
+|-------------|-------------------------------|
+| 1,024 (current small) | 7.4% |
+| 2,048 | 46.6% |
+| 3,072 | 82.8% |
+| **4,096** | **93.8%** |
+| 8,192 | 99.4% |
+
+At max_seq_len=1024, **93% of Expert+ maps are truncated**, losing on average 26% of their tokens. The model never sees proper map endings for most high-quality content. Increasing to 4096 captures 93.8% of Expert/EP content.
+
+**Token overhead:** ~2.7 tokens per note on average (below theoretical max of 3 for POS+LEFT+RIGHT), meaning many positions have both colors sharing one POS token.
+
+### Critical Finding: Quality Weighting is Broken
+
+BeatSaver `score` field is `null` for all 23,599 metadata entries — the pipeline doesn't persist scores from the API. The weighted sampler defaults every custom map to weight 1.0, making quality-based sampling non-functional. All community maps get equal training weight regardless of quality.
+
+### Model Scaling Research
+
+**Scaling law guidance:** Chinchilla-optimal ratio is ~20 tokens/parameter. With 42K samples × ~350 avg tokens = ~15M training tokens, one epoch supports ~750K params. But multi-epoch training (30+ epochs) effectively multiplies this. At 30 epochs × 15M tokens = 450M token presentations, a ~10M param model has 45 tokens/param — reasonable.
+
+**Key finding from prior art:** Yi et al. (ISMIR 2023) found **3 layers with dim=256 optimal** for rhythm game chart generation on ~14K charts. Larger models showed no improvement at that dataset size. The Mapperatorinator project (osu!) uses 219M params but trains on a much larger dataset.
+
+**Recommended scaling target:** 4 encoder layers, 3 decoder layers, dim=256, 8 heads (~8M params). Increase dropout to 0.15. Avoid jumping to 40M+ params — likely to overfit on 42K samples.
+
+### Architecture Research
+
+**Positional encoding:** RoPE (Rotary Position Embedding) provides decaying attention with distance and better length generalization than sinusoidal PE. Now the de facto standard for modern transformers.
+
+**Conformer encoder:** Combines convolution with self-attention (Google, INTERSPEECH 2020). Dominant in speech/audio processing. Local convolution captures rhythmic motifs; global attention captures song structure. Mapperatorinator's success with Whisper (conv-based encoder) validates this approach.
+
+**Onset strength features:** Dance Dance Convolution (2017) found onset detection features significantly improved step placement timing. Onset strength encodes "something musically interesting happened here" — exactly the signal for note placement. Available via `librosa.onset.onset_strength()` and can be concatenated as an extra input channel.
+
+### Training Technique Research
+
+**SpecAugment:** Random time/frequency masking on spectrograms during training. Standard in speech recognition, trivial to implement, provides free regularization.
+
+**Color balance loss:** Auxiliary loss penalizing deviation from 50/50 red/blue per bar. Directly addresses the 70% red imbalance.
+
+**Curriculum learning:** NeurIPS 2024 showed training on shorter/simpler sequences first improves both speed and quality. For Beat Saber: pretrain on Expert (most consistent), then finetune on all difficulties.
+
+**Data augmentation:** Pitch shifting (±2 semitones) changes harmonic content but preserves rhythm and note maps. Time stretching is problematic (invalidates beat alignment). SpecAugment is the safest form.
+
+### Prior Art Survey
+
+| System | Year | Game | Architecture | Key Insight |
+|--------|------|------|-------------|------------|
+| Dance Dance Convolution | 2017 | DDR | CNN + C-LSTM | Onset features improve step placement |
+| DeepSaber | 2020 | Beat Saber | Multi-stream LSTM | First Beat Saber automapper; MFCC features |
+| InfernoSaber | 2023 | Beat Saber | Autoencoder + TCN + DNN | Trains on Expert+ only for best results |
+| Yi et al. (GOCT) | 2023 | osu!mania | Encoder-decoder Transformer | 3L/256d optimal; pretrain→finetune effective |
+| osuT5 | 2024 | osu! | T5 encoder-decoder | Spectrogram encoder, event token decoder |
+| Mapperatorinator | 2024 | osu! | Whisper-based (219M) | Conv encoder outperformed pure attention |
+| osu-dreamer | 2024 | osu! | Diffusion model | Non-autoregressive; viable but lower quality |
+
+Key takeaways: (1) beat alignment is critical (we already do this), (2) conv+attention encoders outperform pure attention for audio, (3) Expert-only training yields best results, (4) pretrain→finetune on curated data works well.
+
+### Hardware Constraints (RTX 4070, 8GB VRAM, 32GB RAM)
+
+| Config | Params | max_seq_len | batch_size | Est. VRAM | Feasible? |
+|--------|--------|-------------|------------|-----------|-----------|
+| Current small | 1M | 1024 | 32 | ~4-5 GB | Yes |
+| Medium (4L/256d) | ~8M | 2048 | 16 | ~6-7 GB | Yes |
+| **Medium (4L/256d)** | **~8M** | **4096** | **4-8** | **~7-8 GB** | **Tight but likely** |
+| Large (6L/384d) | ~40M | 4096 | 2-4 | ~8+ GB | Borderline |
+
+VRAM bottleneck is cross-attention maps: `batch × heads × seq_len × audio_len × 2 bytes`. With 8 heads and seq_len=audio_len=4096, each batch element needs ~256MB for attention maps alone. Gradient accumulation (`accum_steps=4`, `batch_size=4` → effective batch 16) makes this workable.
+
+32GB RAM is sufficient — dataset pre-tokenization peaks at ~14GB, longer sequences add ~4-6GB for token storage.
+
+**Better hardware targets:**
+
+| Hardware | What it unlocks | Cost |
+|----------|----------------|------|
+| RTX 4090 (24GB) | 40M params, batch=16 at seq=4096 | ~$1,600 |
+| Cloud A100 (40GB) | 40M+ params, batch=32+, seq=8192 | ~$1-2/hr |
+
+### Prioritized Improvement Roadmap
+
+**Tier 1 — Do first (high impact, low effort):**
+1. Increase max_seq_len to 4096 (fixes 93% truncation of Expert+ maps)
+2. Scale model to 4L/256d/8heads (~8M params)
+3. Filter to Standard + Expert/ExpertPlus only (~31K samples)
+4. Filter BPM outliers [50-300] (removes 222 degenerate samples)
+5. Add SpecAugment (free regularization)
+
+**Tier 2 — Do next (medium effort):**
+6. Color balance auxiliary loss (fixes 70% red imbalance)
+7. Add onset strength feature channel
+8. Fix BeatSaver score persistence in pipeline
+9. Replace sinusoidal PE with RoPE
+
+**Tier 3 — Later (research-grade):**
+10. Conformer encoder (conv + attention)
+11. Curriculum learning (Expert pretrain → all-difficulty finetune)
+12. Focal loss for token class imbalance
