@@ -45,6 +45,10 @@ _DIFF_NAMES = ["Easy", "Normal", "Hard", "Expert", "ExpertPlus"]
 _DIFF_TO_TOKEN = {name: DIFF_EASY + i for i, name in enumerate(_DIFF_NAMES)}
 _TOKEN_TO_DIFF = {v: k for k, v in _DIFF_TO_TOKEN.items()}
 
+# Case-insensitive lookup + aliases (BeatSaver maps use inconsistent casing)
+_DIFF_LOOKUP = {name.lower(): token for name, token in _DIFF_TO_TOKEN.items()}
+_DIFF_LOOKUP["expert+"] = DIFF_EXPERT_PLUS
+
 # ── Bar / position tokens ──────────────────────────────────────────────────
 
 BAR = 8
@@ -92,7 +96,7 @@ def _decode_note_token(token: int, base: int) -> tuple[int, int, int]:
 
 def difficulty_to_token(difficulty: str) -> int:
     """Map difficulty name to token ID. Raises ValueError for unknown."""
-    token = _DIFF_TO_TOKEN.get(difficulty)
+    token = _DIFF_LOOKUP.get(difficulty.lower())
     if token is None:
         raise ValueError(
             f"Unknown difficulty {difficulty!r}. "

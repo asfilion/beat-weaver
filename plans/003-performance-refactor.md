@@ -123,7 +123,40 @@ notes_table = pa.table({"song_hash": hashes, "beat": beats, ...}, schema=NOTES_S
 | `beat_weaver/model/training.py` | num_workers > 0 (#7) |
 | `beat_weaver/storage/writer.py` | Columnar building (#8) |
 
+## Post-Plan Addition: Parquet Row Group Partitioning
+
+Added after initial plan completion:
+- **Writer:** One row group per `song_hash`, numbered files (`notes_0000.parquet`), split at 1 GB
+- **Reader:** `read_notes_parquet()` handles multi-file and legacy single-file layouts
+- **Dataset:** Uses `read_notes_parquet()` instead of direct `pq.read_table()`
+- **Tests:** 13 new tests in `tests/test_writer.py`
+- **Small config:** `configs/small.json` (1M params, 15s/epoch vs 456s/epoch)
+
+## Status: COMPLETE
+
+All 8 changes implemented and verified. Additional work done during baseline training run:
+
+### Additional Fixes (discovered during full-dataset training)
+- **v3 parser compact format:** `.get()` defaults for v3.3.0 maps that omit default-value keys
+- **int8 overflow:** `_clamp8()` for mapping extension coordinates (x=1000, y=3000)
+- **Difficulty aliases:** Case-insensitive matching + `Expert+` alias in tokenizer
+- **Out-of-grid filtering:** Notes outside standard 4x3 grid filtered during pre-tokenization
+- **Mel pre-caching:** `warm_mel_cache()` with ProcessPoolExecutor (~500 songs/min, 14x faster)
+- **Memory optimization:** Free raw note dicts after tokenization, explicit DataFrame cleanup
+- **Grammar constraint:** Strictly increasing POS in bars prevents duplicate same-beat notes
+- **Audio truncation:** `cmd_generate` truncates mel to max_audio_len before inference
+
+### Checkpoint Resume Fix
+- **Root cause of NaN on resume:** GradScaler not saved — fresh scale=65536 causes overflow
+- **Also missing:** LR scheduler state (causes LR mismatch) and checkpoint overwrite hazard
+- **Fix:** Save `scaler.pt` + `scheduler.pt` in checkpoints; fallbacks for old checkpoints (init_scale=1.0, scheduler fast-forward)
+
+### Full-Dataset Training Results
+- 23K songs, 42K training samples, 1M param model, batch_size=32
+- Best val_loss=2.055, 60.6% accuracy — model plateaued at ~16 epochs
+- Generates playable in-game maps
+
 ## Verification
 
-1. `python -m pytest tests/ -x -q` after each change — all 118 tests pass
+1. `python -m pytest tests/ -x -q` — all 131 tests pass (118 original + 13 new)
 2. Push to remote, verify CI passes (Python 3.11 + 3.12)

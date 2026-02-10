@@ -171,12 +171,15 @@ class Trainer:
         return {"val_loss": avg_loss, "val_token_accuracy": accuracy}
 
     def save_checkpoint(self, name: str) -> Path:
-        """Save model + optimizer + training state."""
+        """Save model + optimizer + scheduler + training state."""
         ckpt_dir = self.output_dir / "checkpoints" / name
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
         torch.save(self.model.state_dict(), ckpt_dir / "model.pt")
         torch.save(self.optimizer.state_dict(), ckpt_dir / "optimizer.pt")
+        if hasattr(self, "scheduler"):
+            torch.save(self.scheduler.state_dict(), ckpt_dir / "scheduler.pt")
+        torch.save(self.scaler.state_dict(), ckpt_dir / "scaler.pt")
         self.config.save(ckpt_dir / "config.json")
 
         state = {
@@ -190,16 +193,53 @@ class Trainer:
     def load_checkpoint(self, ckpt_dir: Path) -> None:
         """Resume from a checkpoint."""
         ckpt_dir = Path(ckpt_dir)
+        self._resume_dir = ckpt_dir
         self.model.load_state_dict(
             torch.load(ckpt_dir / "model.pt", map_location=self.device, weights_only=True),
         )
         self.optimizer.load_state_dict(
             torch.load(ckpt_dir / "optimizer.pt", map_location=self.device, weights_only=True),
         )
+        scaler_path = ckpt_dir / "scaler.pt"
+        if scaler_path.exists():
+            self.scaler.load_state_dict(
+                torch.load(scaler_path, map_location=self.device, weights_only=True),
+            )
+            logger.info("Restored GradScaler state from %s", scaler_path)
+        elif self.device.type == "cuda":
+            # No scaler.pt — use conservative scale=1.0 to avoid overflow
+            self.scaler = torch.amp.GradScaler(init_scale=1.0, growth_interval=1000)
+            logger.info("No scaler.pt found; using conservative init_scale=1.0")
         state = json.loads((ckpt_dir / "training_state.json").read_text())
         self.epoch = state["epoch"]
         self.global_step = state["global_step"]
         self.best_val_loss = state["best_val_loss"]
+
+    def restore_scheduler(self) -> None:
+        """Restore scheduler state if resuming and scheduler.pt exists.
+
+        If no scheduler.pt is found, fast-forward the scheduler to the
+        current global_step so the LR matches where training left off.
+        """
+        resume_dir = getattr(self, "_resume_dir", None)
+        if resume_dir is None:
+            return
+        if not hasattr(self, "scheduler"):
+            return
+        scheduler_path = resume_dir / "scheduler.pt"
+        if scheduler_path.exists():
+            self.scheduler.load_state_dict(
+                torch.load(scheduler_path, map_location=self.device, weights_only=True),
+            )
+            logger.info("Restored LR scheduler state from %s", scheduler_path)
+        elif self.global_step > 0:
+            # No scheduler.pt — fast-forward to match resumed global_step
+            for _ in range(self.global_step):
+                self.scheduler.step()
+            lr = self.optimizer.param_groups[0]["lr"]
+            logger.info(
+                "Fast-forwarded LR scheduler to step %d (lr=%.2e)", self.global_step, lr,
+            )
 
 
 def train(
@@ -252,6 +292,7 @@ def train(
     trainer.scheduler = _build_lr_scheduler(
         trainer.optimizer, config, len(train_loader),
     )
+    trainer.restore_scheduler()
 
     config.save(output_dir / "config.json")
 

@@ -55,7 +55,11 @@ tests/
 ├── test_parsers.py                     # Info/beatmap parser tests (11 tests)
 ├── test_schemas.py                     # Schema & version parsing tests (16 tests)
 ├── test_tokenizer.py                   # Tokenizer encode/decode tests (26 tests)
-└── test_weighted_sampler.py            # Source weighting tests (9 tests, skipped without [ml])
+├── test_weighted_sampler.py            # Source weighting tests (9 tests, skipped without [ml])
+└── test_writer.py                     # Parquet writer tests: row groups, file splitting, reader (13 tests)
+
+configs/
+└── small.json                         # Small model config (1M params, batch_size=32, 2 layers, dim=128)
 ```
 
 ## Core Dataclasses (`beat_weaver/schemas/normalized.py`)
@@ -178,7 +182,11 @@ build-backend = "setuptools.build_meta"
 
 ## Output Format (Parquet)
 
-- `data/processed/notes.parquet` — columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset
-- `data/processed/bombs.parquet` — bombs with position data
-- `data/processed/obstacles.parquet` — walls with duration/dimensions
-- `data/processed/metadata.json` — Song-level metadata keyed by hash
+- `data/processed/notes_NNNN.parquet` — numbered files, one row group per song_hash, split at 1GB. Columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset
+- `data/processed/bombs_NNNN.parquet` — bombs with position data (same numbering scheme)
+- `data/processed/obstacles_NNNN.parquet` — walls with duration/dimensions
+- `data/processed/metadata.json` — Song-level metadata (list of dicts)
+- `data/processed/mel_cache/` — Pre-computed mel spectrograms (`{song_hash}_{bpm}.npy`)
+- `data/audio_manifest.json` — Maps song_hash → audio file path
+
+Reader `read_notes_parquet(path)` handles: directory with `notes_*.parquet`, legacy `notes.parquet`, or direct file path.

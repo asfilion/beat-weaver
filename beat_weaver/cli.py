@@ -107,7 +107,7 @@ def cmd_process(args: argparse.Namespace) -> None:
 def cmd_train(args: argparse.Namespace) -> None:
     from beat_weaver.model.audio import build_audio_manifest, save_manifest, load_manifest
     from beat_weaver.model.config import ModelConfig
-    from beat_weaver.model.dataset import BeatSaberDataset
+    from beat_weaver.model.dataset import BeatSaberDataset, warm_mel_cache
     from beat_weaver.model.training import train
 
     config = ModelConfig()
@@ -124,6 +124,10 @@ def cmd_train(args: argparse.Namespace) -> None:
         return
 
     data_dir = Path(args.data)
+
+    # Pre-compute mel spectrograms in parallel before training
+    warm_mel_cache(data_dir, manifest_path, config)
+
     train_ds = BeatSaberDataset(data_dir, manifest_path, config, split="train")
     val_ds = BeatSaberDataset(data_dir, manifest_path, config, split="val")
 
@@ -160,6 +164,8 @@ def cmd_generate(args: argparse.Namespace) -> None:
 
     mel = compute_mel_spectrogram(audio, sr=sr, n_mels=config.n_mels,
                                   n_fft=config.n_fft, hop_length=config.hop_length)
+    if mel.shape[1] > config.max_audio_len:
+        mel = mel[:, :config.max_audio_len]
     mel_tensor = torch.from_numpy(mel)
 
     tokens = generate(

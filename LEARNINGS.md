@@ -807,3 +807,139 @@ Three tiers defined for flexibility:
 Additional filters applied in processing (not download):
 - Standard characteristic only (exclude 360/90/OneSaber)
 - Must have at least one difficulty with color notes
+
+---
+
+## Parquet Storage Format
+
+### Row Group Strategy
+Notes, bombs, and obstacles are written to numbered Parquet files (`notes_0000.parquet`, `notes_0001.parquet`, etc.) with **one row group per song_hash**. This allows readers to push down predicates and skip irrelevant songs when loading a subset (e.g. only train-split hashes).
+
+### File Splitting
+When a Parquet file exceeds 1 GB (configurable via `max_file_bytes`), a new numbered file is started. This keeps individual files manageable for memory-mapped I/O and cloud storage. The reader (`read_notes_parquet`) transparently handles both:
+- **Multi-file layout:** `notes_0000.parquet`, `notes_0001.parquet`, ...
+- **Legacy single-file:** `notes.parquet` (backward compat)
+
+### Performance Profile (214 official songs, 907K notes)
+- Full table load: ~1s, ~100MB RAM (happens once at training start)
+- Current dataset fits in a single file (~5MB compressed)
+- Splitting becomes relevant at ~50K+ songs with millions of notes
+
+### Baseline Training Results (5 epochs, 214 official songs)
+
+| Config | Params | Epoch Time | Val Loss | Val Acc |
+|--------|--------|-----------|----------|---------|
+| Default (6L/512d) | 44.5M | ~456s | 2.7457 | 40.5% |
+| Small (2L/128d) | 1.0M | ~15s | 2.7379 | 41.5% |
+
+The small model matches the large model's quality on this dataset size, suggesting data volume (not model capacity) is the current bottleneck.
+
+---
+
+## Full-Dataset Training (23K Songs)
+
+### Dataset Scale
+- **23,588 songs** in audio manifest (23,375 BeatSaver custom + 213 official)
+- **54,771 beatmaps** processed (multiple difficulties per song)
+- **40.3M notes** in Parquet (notes_0000.parquet, ~600MB)
+- **42,542 training samples**, 5,282 validation samples (80/10/10 split by song hash)
+- **206 samples filtered** — mapping extension maps with all notes outside standard 4x3 grid
+
+### Data Pipeline Issues Encountered
+
+**v3.3.0 compact format:** Newer BeatSaver maps (v3.3.0+) omit JSON keys that have default values. Parser crashed with `KeyError: 'y'`. Fixed by using `.get()` with defaults in `v3.py` for all note, bomb, and obstacle fields.
+
+**Mapping extensions (Noodle Extensions):** Some maps use coordinates far outside the standard grid (e.g., x=1000, y=3000) for visual effects. These overflow int8 in Arrow/Parquet. Fixed with `_clamp8()` in `writer.py` to clamp to [-128, 127], then filtered in `dataset.py` pre-tokenization (only keep notes where 0 <= x < 4, 0 <= y < 3, 0 <= cut_direction < 9, color in {0, 1}).
+
+**Difficulty name inconsistencies:** BeatSaver maps use various casings (`"normal"`, `"Expert+"` instead of `"Normal"`, `"ExpertPlus"`). Fixed with case-insensitive lookup + alias map in `tokenizer.py`.
+
+### Mel Spectrogram Pre-Caching
+
+Computing mel spectrograms during training's first epoch was a severe bottleneck: ~35 songs/min single-threaded vs 18K+ unique songs = ~8 hours for first epoch.
+
+**Solution:** `warm_mel_cache()` in `dataset.py`:
+- Uses `ProcessPoolExecutor` (up to 8 workers) to compute mel spectrograms before training starts
+- Cache key: `{song_hash}_{bpm}.npy` in `data/processed/mel_cache/`
+- ~500 songs/min → 14K songs in ~25 minutes (14x faster than in-loop)
+- Once warm, subsequent training starts in ~3 minutes (dataset init only)
+- Cache files persist across runs — only new songs need computation
+
+### Memory Optimization
+
+**VRAM:** batch_size=128 maxed out 8GB VRAM (cross-attention maps scale as batch × heads × seq_len × audio_len). batch_size=32 uses ~4-5GB with comfortable headroom.
+
+**RAM:** The dataset stored 42K samples' raw note dicts (list of dicts with 8 keys each) in memory alongside pre-tokenized tokens. Freed raw note dicts after pre-tokenization with `sample.pop("notes", None)`, reducing RAM from ~100% to ~75%.
+
+**DataFrame cleanup:** Explicitly `del df, table, grouped` after pandas groupby loop to free the 40M-row DataFrame and Arrow table immediately.
+
+### Training Results (Small Config: 1M params, batch_size=32)
+
+| Epoch | Train Loss | Val Loss | Val Acc | Notes |
+|-------|-----------|----------|---------|-------|
+| 1 | 3.163 | 3.047 | 35.8% | |
+| 2 | 2.644 | 2.807 | 44.5% | |
+| 3 | 2.467 | 2.657 | 48.3% | |
+| 4 | 2.374 | 2.609 | 49.2% | |
+| 5 | 2.334 | 2.603 | 49.4% | End of first run |
+| 6 | 2.263 | 2.319 | 55.6% | Resumed; LR scheduler reset |
+| 7 | 2.158 | 2.184 | 57.4% | |
+| 8 | 2.114 | 2.216 | 57.4% | Val loss bounce |
+| 9 | 2.091 | 2.191 | 57.9% | |
+| 10 | 2.083 | 2.124 | 59.0% | |
+| 11 | 2.082 | 2.099 | 59.8% | |
+| 12 | 2.091 | 2.063 | 60.4% | |
+| **13** | **2.085** | **2.055** | **60.6%** | **Best model** |
+| 14 | NaN | NaN | 0.0% | Diverged (LR too high) |
+
+**Key observations:**
+- 60.6% token accuracy on 291-vocab task is solid for a 1M param model
+- Epochs 6-13 benefited from LR scheduler restarting on resume (fresh warmup)
+- Training diverged at epoch 14 — cosine LR schedule hit a problematic region after warmup
+- Train loss ≈ val loss throughout (2.08 vs 2.06 at best) — no overfitting, thanks to label smoothing + dropout
+- Each epoch: ~590s (9.8 min), 1,330 batches at batch_size=32, 71 samples/s
+
+### Checkpoint Resume Bug: Missing Training State
+
+Resuming from a checkpoint caused NaN on the first epoch. Three pieces of training state were not saved:
+
+1. **GradScaler** (root cause of NaN): Fresh scaler starts at scale=65536. During training, the scaler backs off to a much lower value. On resume, the 100x+ scale jump causes overflow in mixed-precision backward passes → NaN immediately.
+
+2. **LR Scheduler**: Cosine schedule restarts from warmup, ramping LR to 3e-4 when the model was running at ~1.2e-4. This compounds the scaler issue.
+
+3. **Checkpoint overwrite hazard**: Resuming from `epoch_013` retrains epoch 12, which saves back to `epoch_013` — overwriting the original clean checkpoint with NaN weights. Always resume from `best/` (only overwritten when val_loss improves).
+
+**Fix (implemented):**
+- `save_checkpoint()` now saves `scheduler.pt` and `scaler.pt` alongside model/optimizer
+- `load_checkpoint()` restores scaler state; falls back to `init_scale=1.0` for old checkpoints
+- `restore_scheduler()` restores scheduler state; falls back to fast-forwarding to `global_step`
+
+### Resumed Training Results (after checkpoint fix)
+
+Resumed from best checkpoint (epoch 11, val_loss=2.055) with conservative scaler (init_scale=1.0) and fast-forwarded LR scheduler:
+
+| Epoch | Train Loss | Val Loss | Val Acc | Notes |
+|-------|-----------|----------|---------|-------|
+| 12 | 2.323 | 2.403 | 60.3% | Resumed; recovering |
+| 13 | 2.428 | 2.162 | 58.8% | |
+| 14 | 2.277 | 2.127 | 59.3% | Past previous NaN point |
+| 15 | 2.235 | 2.113 | 59.6% | |
+| 16 | 2.190 | 2.080 | 60.0% | |
+| 16 (re) | 2.145 | 2.063 | 60.3% | Clean resume with scaler.pt |
+
+**Conclusion:** Model plateaued at val_loss ~2.06, matching the original best of 2.055. The 1M param model has saturated on 42K samples. Further improvement requires scaling up model size.
+
+### Grammar Constraint: Strictly Increasing POS
+
+The model was generating multiple notes of the same color at the same beat (e.g., two red notes pointing in opposite directions = impossible to hit). Root cause: the grammar mask allowed any POS token after a RIGHT token, including repeats of the same position.
+
+**Fix:** Track `last_pos_in_bar` during generation. After a RIGHT token, only allow POS tokens with offset strictly greater than the last one in the current bar. Reset on BAR token.
+
+**Result:** Zero duplicate same-color-same-beat notes. Also reduced NPS from 10.6 to 4.5 (more realistic) and extended generated duration from 35s to 79s.
+
+### Generation Quality (Epoch 13 Best Model)
+
+Generated "Boom Kitty - Bassgasm" on Expert difficulty:
+- 352 notes, 4.5 NPS, 79 seconds
+- Playable in-game — verified by user
+- **Issues:** Color imbalance (77% red, 23% blue), audio truncated to ~95s (max_audio_len=4096)
+- **Strengths:** Uses full grid, correct note structure, reasonable difficulty spread
