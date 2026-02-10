@@ -48,8 +48,21 @@ class ModelConfig:
     # Data weighting
     official_ratio: float = 0.2  # Target fraction of each batch from official maps
 
+    # Data filtering
+    min_difficulty: str = "Easy"  # Minimum difficulty to include
+    characteristics: list[str] | None = None  # None = all; ["Standard"] = Standard only
+    min_bpm: float = 0.0
+    max_bpm: float = 9999.0
+
+    # Audio features
+    use_onset_features: bool = False  # Concatenate onset strength as extra mel channel
+
+    # Positional encoding
+    use_rope: bool = False  # Use RoPE instead of sinusoidal PE
+
     # Auxiliary losses
     density_loss_weight: float = 0.1
+    color_balance_weight: float = 0.0  # Weight for color balance auxiliary loss
 
     def save(self, path: Path) -> None:
         """Save config to JSON file."""

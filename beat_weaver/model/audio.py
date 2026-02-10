@@ -142,6 +142,25 @@ def compute_onset_envelope(
     return onset.astype(np.float32).reshape(1, -1)
 
 
+def compute_mel_with_onset(
+    audio: np.ndarray,
+    sr: int = 22050,
+    n_mels: int = 80,
+    n_fft: int = 2048,
+    hop_length: int = 512,
+) -> np.ndarray:
+    """Compute log-mel spectrogram with onset strength as extra channel.
+
+    Returns float32 array of shape (n_mels + 1, T).
+    """
+    mel = compute_mel_spectrogram(audio, sr=sr, n_mels=n_mels, n_fft=n_fft,
+                                  hop_length=hop_length)
+    onset = compute_onset_envelope(audio, sr=sr, hop_length=hop_length)
+    # Align lengths (onset may differ by 1 frame from mel)
+    min_len = min(mel.shape[1], onset.shape[1])
+    return np.vstack([mel[:, :min_len], onset[:, :min_len]])
+
+
 # ── Audio manifest ──────────────────────────────────────────────────────────
 
 _AUDIO_EXTENSIONS = {".ogg", ".egg", ".wav", ".mp3", ".flac"}

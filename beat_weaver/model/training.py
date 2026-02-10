@@ -14,7 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from beat_weaver.model.config import ModelConfig
 from beat_weaver.model.dataset import BeatSaberDataset, build_weighted_sampler, collate_fn
-from beat_weaver.model.tokenizer import PAD
+from beat_weaver.model.tokenizer import LEFT_BASE, LEFT_COUNT, PAD, RIGHT_BASE, RIGHT_COUNT
 from beat_weaver.model.transformer import BeatWeaverModel
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,23 @@ def _build_lr_scheduler(
         return 0.5 * (1.0 + __import__("math").cos(__import__("math").pi * progress))
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
+def _color_balance_loss(logits: torch.Tensor) -> torch.Tensor:
+    """Penalize deviation from 50/50 LEFT/RIGHT token probability.
+
+    Only considers positions where a note token (LEFT or RIGHT) is likely.
+    """
+    probs = torch.softmax(logits, dim=-1)  # (batch, seq, vocab)
+    left_prob = probs[:, :, LEFT_BASE : LEFT_BASE + LEFT_COUNT].sum(dim=-1)
+    right_prob = probs[:, :, RIGHT_BASE : RIGHT_BASE + RIGHT_COUNT].sum(dim=-1)
+    total = left_prob + right_prob + 1e-8
+    # Only count positions where note tokens have meaningful probability
+    note_mask = total > 0.1
+    if not note_mask.any():
+        return torch.tensor(0.0, device=logits.device)
+    left_ratio = left_prob[note_mask] / total[note_mask]
+    return ((left_ratio - 0.5) ** 2).mean()
 
 
 class Trainer:
@@ -103,6 +120,9 @@ class Trainer:
                     logits.reshape(-1, logits.size(-1)),
                     target_tokens.reshape(-1),
                 )
+                # Color balance auxiliary loss
+                if self.config.color_balance_weight > 0:
+                    loss = loss + self.config.color_balance_weight * _color_balance_loss(logits)
                 loss = loss / accum_steps  # Scale for accumulation
 
             self.scaler.scale(loss).backward()
