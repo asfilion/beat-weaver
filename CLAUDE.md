@@ -10,8 +10,9 @@ Given an audio file as input, the system generates block positions and orientati
 
 1. **Data Pipeline** (complete) — Extract, parse, normalize Beat Saber maps into Parquet
 2. **ML Model** (complete) — Encoder-decoder transformer for audio → token sequence generation
-3. **Baseline Training** (complete) — 13 epochs on 23K songs, 60.6% token accuracy, generates playable maps
-4. **Feedback System** (future) — In-game mechanism for player feedback to improve the model
+3. **Baseline Training** (complete) — 16 epochs on 23K songs, 60.6% token accuracy, generates playable maps
+4. **Model Improvements** (complete) — Filtering, SpecAugment, onset features, RoPE, color balance loss, medium config
+5. **Feedback System** (future) — In-game mechanism for player feedback to improve the model
 
 ## Beat Saber Map Format Quick Reference
 
@@ -51,33 +52,35 @@ Install: `pip install -e .` (core) or `pip install -e ".[ml]"` (with ML dependen
 - `beat_weaver.storage.writer` — Parquet output (notes/bombs/obstacles)
 - `beat_weaver.model.tokenizer` — encode/decode beatmaps ↔ token sequences (291 vocab)
 - `beat_weaver.model.audio` — mel spectrogram extraction, beat-aligned framing, BPM auto-detection
-- `beat_weaver.model.transformer` — AudioEncoder + TokenDecoder + BeatWeaverModel
+- `beat_weaver.model.transformer` — AudioEncoder + TokenDecoder + BeatWeaverModel (sinusoidal PE or RoPE)
 - `beat_weaver.model.inference` — autoregressive generation with grammar mask
 - `beat_weaver.model.exporter` — token sequence → playable v2 map folder
 - `beat_weaver.model.evaluate` — onset F1, NPS accuracy, parity, diversity metrics
 
 **Output format:** `data/processed/notes_NNNN.parquet` (one row group per song, split at 1 GB) with columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset. Reader (`read_notes_parquet`) handles both multi-file and legacy single-file layouts.
 
-**Model configs:** `configs/small.json` (1M params, batch_size=32, ~10min/epoch on full dataset) for fast iteration. Default config (44.5M params) for full training.
+**Model configs:** `configs/small.json` (1M params, batch_size=32) for fast iteration. `configs/medium.json` (6.5M params, 4L/256d, seq_len=4096, Expert+ only, onset features) for 8GB VRAM training. Default config (44.5M params) for full training.
 
-**Tests:** `python -m pytest tests/ -v` (131 tests; ML tests skipped without `.[ml]` deps)
+**Tests:** `python -m pytest tests/ -v` (158 tests; ML tests skipped without `.[ml]` deps)
 
-**Training data:** 23,588 songs (23,375 BeatSaver + 213 official), 42,542 training samples, 40.3M notes total. Mel spectrograms pre-cached to `data/processed/mel_cache/` (~23K `.npy` files, ~30GB).
+**Training data:** 23,588 songs (23,375 BeatSaver + 213 official), 42,542 training samples, 40.3M notes total. Mel spectrograms pre-cached to `data/processed/mel_cache/` (~23K `.npy` files, ~30GB). Cache auto-invalidates when audio feature config changes (VERSION file).
 
 ## ML Model
 
 See [LEARNINGS.md](LEARNINGS.md) for research details, [plans/002-ml-model.md](plans/002-ml-model.md) for implementation plan.
 
-- **Architecture:** Encoder-decoder transformer (44.5M params default, 1M params small config)
-- **Audio input:** Log-mel spectrogram (80 bins, sr=22050, hop=512), beat-aligned to 1/16th note grid
+- **Architecture:** Encoder-decoder transformer (44.5M default, 6.5M medium, 1M small)
+- **Audio input:** Log-mel spectrogram (80 bins, sr=22050, hop=512), beat-aligned to 1/16th note grid. Optional onset strength channel (+1 bin).
+- **Positional encoding:** Sinusoidal (default) or RoPE (config.use_rope). RoPE applied to self-attention Q/K only (not cross-attention).
 - **Scope:** Color notes only (no bombs, walls, arcs, chains until core model performs well)
 - **Output:** Beat-quantized compound tokens (291 vocab) → v2 Beat Saber JSON
 - **Token format:** `START DIFF BAR POS LEFT RIGHT ... BAR ... END`
-- **Training:** Cross-entropy with label smoothing, AdamW + cosine LR, mixed-precision, early stopping, weighted sampling (official 20% of batch, custom weighted by score)
+- **Training:** Cross-entropy with label smoothing + optional color balance auxiliary loss, AdamW + cosine LR, mixed-precision, early stopping, weighted sampling (official 20% of batch, custom weighted by BeatSaver score)
+- **Data augmentation:** SpecAugment (time/frequency masking, training split only)
+- **Data filtering:** By difficulty (min_difficulty), characteristic, BPM range. Out-of-grid notes filtered during pre-tokenization.
 - **Inference:** Autoregressive with grammar-constrained decoding (strictly increasing POS per bar), temperature/top-k/top-p sampling
 - **Evaluation:** Onset F1, parity violation rate, NPS accuracy, beat alignment, pattern diversity
-- **Mel pre-caching:** `warm_mel_cache()` computes all spectrograms in parallel before training starts (ProcessPoolExecutor, ~25min for 14K songs)
-- **Data filtering:** Out-of-grid notes (mapping extensions) filtered during pre-tokenization; difficulty names case-insensitive with `Expert+` alias
+- **Mel pre-caching:** `warm_mel_cache()` computes all spectrograms in parallel before training starts (ProcessPoolExecutor, ~25min for 14K songs). Cache versioned and auto-invalidated on config change.
 
 ## Baseline Training Results (small config, 23K songs)
 
@@ -87,8 +90,8 @@ Best model after 16 epochs: **val_loss=2.055, 60.6% token accuracy**. Model plat
 
 ## Open Questions
 
-- **Larger model:** Try 4-layer/256d (~10M params) now that data pipeline is proven at scale
-- **Color balance:** Model generates ~70% red notes; may need loss weighting or data augmentation
+- **Medium model training:** Ready to train with `configs/medium.json` — 6.5M params, Expert+ only, onset features, fits 8GB VRAM
+- **RoPE evaluation:** RoPE implemented but disabled by default (use_rope=False). Enable and compare against sinusoidal PE.
 - **Full-song generation:** Audio truncated to max_audio_len=4096 frames (~95s at 22050Hz/512hop); need windowed generation for full songs
 - **Feedback capture system:** In-game mechanism to collect player feedback (later phase)
 - **RL fine-tuning:** After supervised pretraining, fine-tune with player feedback reward model
