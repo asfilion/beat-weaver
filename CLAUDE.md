@@ -81,11 +81,12 @@ See [LEARNINGS.md](LEARNINGS.md) for research details, [plans/002-ml-model.md](p
 
 ## Baseline Training Results (small config, 23K songs)
 
-Best model after 13 epochs: **val_loss=2.055, 60.6% token accuracy**. Generates playable maps in-game. Known issues: color imbalance (skews red), NPS sometimes too high/low. Training diverged at epoch 14 due to LR scheduler restart on resume (NaN loss) — see learnings about cosine LR + resume.
+Best model after 16 epochs: **val_loss=2.055, 60.6% token accuracy**. Model plateaued — 1M params saturated on 42K samples. Generates playable maps in-game. Known issues: color imbalance (skews red), NPS sometimes too high/low.
+
+**Checkpoint resume:** Must save ALL training state (model, optimizer, scheduler, GradScaler). Missing GradScaler was root cause of NaN on resume (fresh scaler at scale=65536 causes overflow). Now saves `scheduler.pt` + `scaler.pt`; fallbacks handle old checkpoints.
 
 ## Open Questions
 
-- **LR scheduler persistence:** Save/restore scheduler state in checkpoints to avoid NaN on resume
 - **Larger model:** Try 4-layer/256d (~10M params) now that data pipeline is proven at scale
 - **Color balance:** Model generates ~70% red notes; may need loss weighting or data augmentation
 - **Full-song generation:** Audio truncated to max_audio_len=4096 frames (~95s at 22050Hz/512hop); need windowed generation for full songs

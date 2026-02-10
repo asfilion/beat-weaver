@@ -898,11 +898,35 @@ Computing mel spectrograms during training's first epoch was a severe bottleneck
 - Train loss ≈ val loss throughout (2.08 vs 2.06 at best) — no overfitting, thanks to label smoothing + dropout
 - Each epoch: ~590s (9.8 min), 1,330 batches at batch_size=32, 71 samples/s
 
-### LR Scheduler Resume Bug
+### Checkpoint Resume Bug: Missing Training State
 
-When resuming from a checkpoint, the LR scheduler restarts from scratch (warmup → cosine decay) because its state isn't saved. This accidentally helped epochs 6-13 (fresh warmup refined the already-converged model), but then caused divergence at epoch 14 when the LR peaked too high for the model's state.
+Resuming from a checkpoint caused NaN on the first epoch. Three pieces of training state were not saved:
 
-**Fix needed:** Save and restore `scheduler.state_dict()` in checkpoints, or use a lower `--lr` when resuming.
+1. **GradScaler** (root cause of NaN): Fresh scaler starts at scale=65536. During training, the scaler backs off to a much lower value. On resume, the 100x+ scale jump causes overflow in mixed-precision backward passes → NaN immediately.
+
+2. **LR Scheduler**: Cosine schedule restarts from warmup, ramping LR to 3e-4 when the model was running at ~1.2e-4. This compounds the scaler issue.
+
+3. **Checkpoint overwrite hazard**: Resuming from `epoch_013` retrains epoch 12, which saves back to `epoch_013` — overwriting the original clean checkpoint with NaN weights. Always resume from `best/` (only overwritten when val_loss improves).
+
+**Fix (implemented):**
+- `save_checkpoint()` now saves `scheduler.pt` and `scaler.pt` alongside model/optimizer
+- `load_checkpoint()` restores scaler state; falls back to `init_scale=1.0` for old checkpoints
+- `restore_scheduler()` restores scheduler state; falls back to fast-forwarding to `global_step`
+
+### Resumed Training Results (after checkpoint fix)
+
+Resumed from best checkpoint (epoch 11, val_loss=2.055) with conservative scaler (init_scale=1.0) and fast-forwarded LR scheduler:
+
+| Epoch | Train Loss | Val Loss | Val Acc | Notes |
+|-------|-----------|----------|---------|-------|
+| 12 | 2.323 | 2.403 | 60.3% | Resumed; recovering |
+| 13 | 2.428 | 2.162 | 58.8% | |
+| 14 | 2.277 | 2.127 | 59.3% | Past previous NaN point |
+| 15 | 2.235 | 2.113 | 59.6% | |
+| 16 | 2.190 | 2.080 | 60.0% | |
+| 16 (re) | 2.145 | 2.063 | 60.3% | Clean resume with scaler.pt |
+
+**Conclusion:** Model plateaued at val_loss ~2.06, matching the original best of 2.055. The 1M param model has saturated on 42K samples. Further improvement requires scaling up model size.
 
 ### Grammar Constraint: Strictly Increasing POS
 

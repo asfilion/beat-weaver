@@ -146,9 +146,14 @@ All 8 changes implemented and verified. Additional work done during baseline tra
 - **Grammar constraint:** Strictly increasing POS in bars prevents duplicate same-beat notes
 - **Audio truncation:** `cmd_generate` truncates mel to max_audio_len before inference
 
+### Checkpoint Resume Fix
+- **Root cause of NaN on resume:** GradScaler not saved — fresh scale=65536 causes overflow
+- **Also missing:** LR scheduler state (causes LR mismatch) and checkpoint overwrite hazard
+- **Fix:** Save `scaler.pt` + `scheduler.pt` in checkpoints; fallbacks for old checkpoints (init_scale=1.0, scheduler fast-forward)
+
 ### Full-Dataset Training Results
 - 23K songs, 42K training samples, 1M param model, batch_size=32
-- Best val_loss=2.055, 60.6% accuracy after 13 epochs (~2 hours)
+- Best val_loss=2.055, 60.6% accuracy — model plateaued at ~16 epochs
 - Generates playable in-game maps
 
 ## Verification
