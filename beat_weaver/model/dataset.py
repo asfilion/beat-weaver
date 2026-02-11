@@ -212,6 +212,10 @@ class BeatSaberDataset(Dataset):
         else:
             self.metadata = raw_meta
 
+        # Back-fill BeatSaver scores from raw _beatsaver_meta.json files
+        # when metadata.json was generated before score injection existed.
+        self._backfill_beatsaver_scores()
+
         # Mel spectrogram cache directory
         self.mel_cache_dir = self.processed_dir / "mel_cache"
         self.mel_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -343,6 +347,45 @@ class BeatSaberDataset(Dataset):
             "BeatSaberDataset(%s): %d samples from %d songs",
             split, len(self.samples), len(split_hashes),
         )
+
+    def _backfill_beatsaver_scores(self) -> None:
+        """Load BeatSaver scores from raw _beatsaver_meta.json files.
+
+        When metadata.json was generated before score injection existed,
+        all beatsaver scores will be None. This method reads scores from
+        the original _beatsaver_meta.json files (located next to audio files
+        referenced in the audio manifest) and patches the in-memory metadata.
+        """
+        # Check if any beatsaver entries are missing scores
+        needs_backfill = any(
+            m.get("source") == "beatsaver" and m.get("score") is None
+            for m in self.metadata.values()
+        )
+        if not needs_backfill:
+            return
+
+        filled = 0
+        for song_hash, meta in self.metadata.items():
+            if meta.get("source") != "beatsaver" or meta.get("score") is not None:
+                continue
+            audio_path = self.audio_manifest.get(song_hash)
+            if audio_path is None:
+                continue
+            meta_path = Path(audio_path).parent / "_beatsaver_meta.json"
+            if not meta_path.exists():
+                continue
+            try:
+                bs_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                stats = bs_meta.get("stats", {})
+                score = stats.get("score")
+                if score is not None:
+                    meta["score"] = score
+                    filled += 1
+            except (json.JSONDecodeError, OSError):
+                continue
+
+        if filled > 0:
+            logger.info("Back-filled BeatSaver scores for %d songs from raw metadata", filled)
 
     def __len__(self) -> int:
         return len(self.samples)
