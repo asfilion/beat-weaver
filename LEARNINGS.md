@@ -49,6 +49,7 @@ This document is the project's curated knowledge base, capturing research findin
 - [Dataset Composition Analysis](#dataset-composition-analysis) — Difficulty/source/characteristic distribution, token lengths
 - [Critical Finding: Token Truncation](#critical-finding-token-truncation) — 93% of Expert+ maps truncated at seq_len=1024
 - [Critical Finding: Quality Weighting is Broken](#critical-finding-quality-weighting-is-broken) — BeatSaver scores not persisted
+- [BeatSaver Score Formula](#beatsaver-score-formula) — Confidence-adjusted popularity rating from upvotes/downvotes
 - [Model Scaling Research](#model-scaling-research) — Chinchilla scaling laws, Yi et al. optimal config
 - [Architecture Research](#architecture-research) — RoPE, Conformer encoder, onset features
 - [Training Technique Research](#training-technique-research) — SpecAugment, color balance loss, curriculum
@@ -1002,6 +1003,29 @@ At max_seq_len=1024, **93% of Expert+ maps are truncated**, losing on average 26
 ### Critical Finding: Quality Weighting is Broken
 
 BeatSaver `score` field is `null` for all 23,599 metadata entries — the pipeline doesn't persist scores from the API. The weighted sampler defaults every custom map to weight 1.0, making quality-based sampling non-functional. All community maps get equal training weight regardless of quality.
+
+**Resolution:** Fixed by adding score back-fill in the dataset loader. When `metadata.json` has `null` scores for BeatSaver maps, the dataset reads scores directly from the raw `_beatsaver_meta.json` files at load time. No reprocessing required.
+
+### BeatSaver Score Formula
+
+BeatSaver uses a custom confidence-adjusted popularity formula (from [beatsaver-main source](https://github.com/beatmaps-io/beatsaver-main), `vote.kt`):
+
+```
+rawScore = upvotes / (upvotes + downvotes)
+score = rawScore - (rawScore - 0.5) × 2^(-log₃(totalVotes/2 + 1))
+```
+
+The dampening factor `2^(-log₃(totalVotes/2 + 1))` pulls the score toward 0.5 when vote counts are low, with less influence as votes accumulate. This prevents maps with very few votes from having artificially extreme scores.
+
+**Practical examples:**
+| Upvotes | Downvotes | Raw Ratio | BeatSaver Score |
+|---------|-----------|-----------|-----------------|
+| 5       | 0         | 1.000     | ~0.73           |
+| 50      | 3         | 0.943     | ~0.92           |
+| 100     | 5         | 0.952     | ~0.94           |
+| 500     | 25        | 0.952     | ~0.95           |
+
+**Implication for training:** Our download filter (`min_score >= 0.75`) naturally favors maps that are both well-liked *and* well-tested by the community. Maps with few votes get conservative scores even if all votes are positive. The weighted sampler then further upweights higher-scored maps within the training set (scores range ~0.75–1.0).
 
 ### Model Scaling Research
 
