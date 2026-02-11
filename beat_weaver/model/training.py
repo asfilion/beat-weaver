@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import time
 from pathlib import Path
 
@@ -287,7 +288,9 @@ def train(
 
     sampler = build_weighted_sampler(train_dataset, config.official_ratio)
     use_cuda = trainer.device.type == "cuda"
-    num_workers = 2 if use_cuda else 0
+    # Windows spawn-based multiprocessing causes DataLoader worker deadlocks
+    # between epochs with persistent_workers. Use num_workers=0 on Windows.
+    num_workers = 0 if sys.platform == "win32" else (2 if use_cuda else 0)
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
