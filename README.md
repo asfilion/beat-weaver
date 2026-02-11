@@ -76,16 +76,19 @@ beat-weaver evaluate --checkpoint output/training/checkpoints/best --audio-manif
 
 ## Architecture
 
-An encoder-decoder transformer (~40M parameters) that takes a log-mel spectrogram as input and generates a sequence of beat-quantized tokens representing note placements.
+An encoder-decoder transformer that takes a log-mel spectrogram as input and generates a sequence of beat-quantized tokens representing note placements.
 
 ```
-Audio (mel spectrogram) → [Audio Encoder] → [Token Decoder] → Token Sequence → v2 Beat Saber Map
+Audio (mel spectrogram + onset) → [Audio Encoder] → [Token Decoder] → Token Sequence → v2 Beat Saber Map
 ```
 
 - **Tokenizer:** 291-token vocabulary encoding difficulty, bar structure, beat positions, and compound note placements (position + direction per hand)
-- **Encoder:** Linear projection + sinusoidal positional encoding + Transformer encoder (6 layers)
-- **Decoder:** Token embedding + positional encoding + Transformer decoder with cross-attention (6 layers)
+- **Encoder:** Linear projection + positional encoding (sinusoidal or RoPE) + Transformer encoder
+- **Decoder:** Token embedding + positional encoding + Transformer decoder with cross-attention
+- **Audio features:** Log-mel spectrogram (80 bins) with optional onset strength channel
+- **Training:** SpecAugment, color balance loss, dataset filtering by difficulty/characteristic/BPM
 - **Inference:** Autoregressive generation with grammar constraints ensuring valid map structure
+- **Configs:** Small (1M params), medium (6.5M params, 8GB VRAM), default (44.5M params)
 
 See [LEARNINGS.md](LEARNINGS.md) for research details and [plans/](plans/) for implementation plans.
 
@@ -93,12 +96,14 @@ See [LEARNINGS.md](LEARNINGS.md) for research details and [plans/](plans/) for i
 
 - **Data pipeline** — complete (parsers for v2/v3/v4 maps, BeatSaver downloader, Unity extractor, Parquet storage)
 - **ML model** — complete (tokenizer, audio preprocessing, transformer, training loop, inference, exporter, evaluation)
-- **Next:** Collect training data, train model, evaluate on real songs
+- **Baseline training** — complete (16 epochs, 23K songs, 60.6% token accuracy, generates playable maps)
+- **Model improvements** — complete (dataset filtering, SpecAugment, onset features, RoPE, color balance loss, medium config)
+- **Next:** Train medium model on Expert+ data, evaluate quality improvements
 
 ## Tests
 
 ```bash
-# Run all tests (118 total; ML tests auto-skip without ML deps)
+# Run all tests (158 total; ML tests auto-skip without ML deps)
 python -m pytest tests/ -v
 ```
 

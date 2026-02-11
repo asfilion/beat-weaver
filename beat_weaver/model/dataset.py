@@ -18,6 +18,7 @@ from torch.utils.data import Dataset, WeightedRandomSampler
 from beat_weaver.model.audio import (
     beat_align_spectrogram,
     compute_mel_spectrogram,
+    compute_mel_with_onset,
     load_audio,
     load_manifest,
 )
@@ -36,19 +37,32 @@ logger = logging.getLogger(__name__)
 def _compute_one_mel(
     audio_path: str, song_hash: str, bpm: float, cache_path: str,
     sr: int, n_mels: int, n_fft: int, hop_length: int,
+    use_onset: bool = False,
 ) -> str | None:
     """Compute and cache one mel spectrogram. Returns song_hash on success, None on error."""
     try:
         audio, actual_sr = load_audio(Path(audio_path), sr=sr)
-        mel = compute_mel_spectrogram(
-            audio, sr=actual_sr, n_mels=n_mels, n_fft=n_fft, hop_length=hop_length,
-        )
+        if use_onset:
+            mel = compute_mel_with_onset(
+                audio, sr=actual_sr, n_mels=n_mels, n_fft=n_fft, hop_length=hop_length,
+            )
+        else:
+            mel = compute_mel_spectrogram(
+                audio, sr=actual_sr, n_mels=n_mels, n_fft=n_fft, hop_length=hop_length,
+            )
         mel = beat_align_spectrogram(mel, sr=actual_sr, hop_length=hop_length, bpm=bpm)
         np.save(cache_path, mel)
         return song_hash
     except Exception as e:
         logger.warning("Failed to compute mel for %s: %s", song_hash, e)
         return None
+
+
+def _cache_version_key(config: ModelConfig) -> str:
+    """Compute a version string from feature-relevant config fields."""
+    import hashlib
+    key = f"{config.n_mels}_{config.n_fft}_{config.hop_length}_{config.sample_rate}_{config.use_onset_features}"
+    return hashlib.md5(key.encode()).hexdigest()[:12]
 
 
 def warm_mel_cache(
@@ -64,6 +78,29 @@ def warm_mel_cache(
     """
     cache_dir = processed_dir / "mel_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check cache version — invalidate if feature config changed
+    version_file = cache_dir / "VERSION"
+    expected_version = _cache_version_key(config)
+    needs_clear = False
+    if version_file.exists():
+        current_version = version_file.read_text().strip()
+        if current_version != expected_version:
+            needs_clear = True
+    else:
+        # No VERSION file but cache files exist — legacy cache, must clear
+        if any(cache_dir.glob("*.npy")):
+            needs_clear = True
+    if needs_clear:
+        n_stale = sum(1 for _ in cache_dir.glob("*.npy"))
+        logger.warning(
+            "Mel cache version mismatch (need %s). "
+            "Clearing %d stale files and recomputing.",
+            expected_version, n_stale,
+        )
+        for npy_file in cache_dir.glob("*.npy"):
+            npy_file.unlink()
+    version_file.write_text(expected_version)
 
     manifest = load_manifest(audio_manifest_path)
 
@@ -108,6 +145,7 @@ def warm_mel_cache(
             executor.submit(
                 _compute_one_mel, audio_path, song_hash, bpm, cache_path,
                 config.sample_rate, config.n_mels, config.n_fft, config.hop_length,
+                config.use_onset_features,
             ): song_hash
             for audio_path, song_hash, bpm, cache_path in todo
         }
@@ -148,6 +186,11 @@ class BeatSaberDataset(Dataset):
     Returns (mel_spectrogram, token_ids, token_mask) tensors.
     """
 
+    # Difficulty rank for filtering (matches DifficultyInfo.difficulty_rank)
+    _DIFF_RANK = {
+        "Easy": 1, "Normal": 3, "Hard": 5, "Expert": 7, "ExpertPlus": 9,
+    }
+
     def __init__(
         self,
         processed_dir: Path,
@@ -156,6 +199,7 @@ class BeatSaberDataset(Dataset):
         split: str = "train",
     ) -> None:
         self.config = config
+        self.split = split
         self.processed_dir = Path(processed_dir)
         self.audio_manifest = load_manifest(audio_manifest_path)
 
@@ -192,22 +236,42 @@ class BeatSaberDataset(Dataset):
         all_hashes = sorted(df["song_hash"].unique())
         split_hashes = set(_split_hashes(all_hashes, split))
 
+        # Prepare filtering thresholds from config
+        min_diff_rank = self._DIFF_RANK.get(config.min_difficulty, 1)
+        allowed_chars = set(config.characteristics) if config.characteristics else None
+        filtered_counts = {"difficulty": 0, "characteristic": 0, "bpm": 0}
+
         for (song_hash, difficulty, characteristic), group in grouped:
             if song_hash not in split_hashes:
                 continue
             if song_hash not in self.audio_manifest:
                 continue
+            # Apply config-driven filters
+            if self._DIFF_RANK.get(difficulty, 0) < min_diff_rank:
+                filtered_counts["difficulty"] += 1
+                continue
+            if allowed_chars and characteristic not in allowed_chars:
+                filtered_counts["characteristic"] += 1
+                continue
             note_dicts = group[note_cols].to_dict("records")
+            bpm = note_dicts[0]["bpm"]
+            if bpm < config.min_bpm or bpm > config.max_bpm:
+                filtered_counts["bpm"] += 1
+                continue
             meta = self.metadata.get(song_hash, {})
             self.samples.append({
                 "song_hash": song_hash,
                 "difficulty": difficulty,
                 "characteristic": characteristic,
                 "notes": note_dicts,
-                "bpm": note_dicts[0]["bpm"],
+                "bpm": bpm,
                 "source": meta.get("source", "unknown"),
                 "score": meta.get("score"),
             })
+
+        for reason, count in filtered_counts.items():
+            if count > 0:
+                logger.info("Filtered %d samples by %s", count, reason)
 
         # Free the large DataFrame and Arrow table now that samples are built
         del df, table, grouped
@@ -299,12 +363,20 @@ class BeatSaberDataset(Dataset):
         else:
             audio_path = self.audio_manifest[song_hash]
             audio, sr = load_audio(Path(audio_path), sr=self.config.sample_rate)
-            mel = compute_mel_spectrogram(
-                audio, sr=sr,
-                n_mels=self.config.n_mels,
-                n_fft=self.config.n_fft,
-                hop_length=self.config.hop_length,
-            )
+            if self.config.use_onset_features:
+                mel = compute_mel_with_onset(
+                    audio, sr=sr,
+                    n_mels=self.config.n_mels,
+                    n_fft=self.config.n_fft,
+                    hop_length=self.config.hop_length,
+                )
+            else:
+                mel = compute_mel_spectrogram(
+                    audio, sr=sr,
+                    n_mels=self.config.n_mels,
+                    n_fft=self.config.n_fft,
+                    hop_length=self.config.hop_length,
+                )
             mel = beat_align_spectrogram(
                 mel, sr=sr, hop_length=self.config.hop_length, bpm=bpm,
             )
@@ -314,11 +386,34 @@ class BeatSaberDataset(Dataset):
         if mel.shape[1] > self.config.max_audio_len:
             mel = mel[:, : self.config.max_audio_len]
 
+        # SpecAugment: random time/frequency masking (training only)
+        if self.split == "train":
+            mel = self._spec_augment(mel)
+
         return (
             torch.from_numpy(mel),                          # (n_mels, T_audio)
             torch.tensor(token_ids, dtype=torch.long),      # (max_seq_len,)
             torch.tensor(mask, dtype=torch.bool),           # (max_seq_len,)
         )
+
+    @staticmethod
+    def _spec_augment(mel: np.ndarray) -> np.ndarray:
+        """Apply SpecAugment: random time and frequency masking."""
+        mel = mel.copy()  # Don't mutate cached data
+        n_mels, n_frames = mel.shape
+        if n_frames == 0:
+            return mel
+        # Frequency masking: 2 bands, width up to 10 bins
+        for _ in range(2):
+            f = np.random.randint(1, min(11, n_mels))
+            f0 = np.random.randint(0, n_mels - f + 1)
+            mel[f0:f0 + f, :] = 0.0
+        # Time masking: 2 bands, width up to 20 frames
+        for _ in range(2):
+            t = np.random.randint(1, min(21, n_frames))
+            t0 = np.random.randint(0, n_frames - t + 1)
+            mel[:, t0:t0 + t] = 0.0
+        return mel
 
 
 def collate_fn(

@@ -68,8 +68,27 @@ def _process_single_folder(
 ) -> list:
     """Process a single map folder (top-level for pickling by ProcessPoolExecutor)."""
     from beat_weaver.pipeline.processor import process_map_folder
+    from beat_weaver.sources.beatsaver import load_beatsaver_meta
 
-    return process_map_folder(map_folder, source=source, source_id=map_folder.name)
+    beatmaps = process_map_folder(map_folder, source=source, source_id=map_folder.name)
+
+    # Inject BeatSaver score/votes into metadata if available
+    if source == "beatsaver":
+        meta = load_beatsaver_meta(map_folder)
+        if meta:
+            stats = meta.get("stats", {})
+            score = stats.get("score")
+            upvotes = stats.get("upvotes")
+            downvotes = stats.get("downvotes")
+            for bm in beatmaps:
+                if score is not None:
+                    bm.metadata.score = score
+                if upvotes is not None:
+                    bm.metadata.upvotes = upvotes
+                if downvotes is not None:
+                    bm.metadata.downvotes = downvotes
+
+    return beatmaps
 
 
 def cmd_process(args: argparse.Namespace) -> None:
@@ -140,7 +159,9 @@ def cmd_train(args: argparse.Namespace) -> None:
 
 def cmd_generate(args: argparse.Namespace) -> None:
     import torch
-    from beat_weaver.model.audio import compute_mel_spectrogram, detect_bpm, load_audio
+    from beat_weaver.model.audio import (
+        compute_mel_spectrogram, compute_mel_with_onset, detect_bpm, load_audio,
+    )
     from beat_weaver.model.config import ModelConfig
     from beat_weaver.model.exporter import export_map
     from beat_weaver.model.inference import generate
@@ -162,8 +183,12 @@ def cmd_generate(args: argparse.Namespace) -> None:
         bpm = detect_bpm(audio, sr=sr)
         print(f"Auto-detected BPM: {bpm:.1f}")
 
-    mel = compute_mel_spectrogram(audio, sr=sr, n_mels=config.n_mels,
-                                  n_fft=config.n_fft, hop_length=config.hop_length)
+    if config.use_onset_features:
+        mel = compute_mel_with_onset(audio, sr=sr, n_mels=config.n_mels,
+                                     n_fft=config.n_fft, hop_length=config.hop_length)
+    else:
+        mel = compute_mel_spectrogram(audio, sr=sr, n_mels=config.n_mels,
+                                      n_fft=config.n_fft, hop_length=config.hop_length)
     if mel.shape[1] > config.max_audio_len:
         mel = mel[:, :config.max_audio_len]
     mel_tensor = torch.from_numpy(mel)

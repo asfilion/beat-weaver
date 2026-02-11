@@ -17,8 +17,8 @@ beat_weaver/
 │   ├── exporter.py                      # Token sequence → playable v2 Beat Saber map folder
 │   ├── inference.py                     # Autoregressive generation with grammar-constrained decoding
 │   ├── tokenizer.py                     # Token vocabulary (291), encode/decode beatmap ↔ tokens
-│   ├── training.py                      # Training loop: mixed-precision, checkpointing, early stopping
-│   └── transformer.py                   # AudioEncoder + TokenDecoder + BeatWeaverModel (~40M params)
+│   ├── training.py                      # Training loop: mixed-precision, checkpointing, early stopping, color balance loss
+│   └── transformer.py                   # AudioEncoder + TokenDecoder + BeatWeaverModel (sinusoidal PE or RoPE)
 ├── parsers/
 │   ├── __init__.py
 │   ├── beatmap_parser.py               # Top-level: parse_map_folder(path) → list[NormalizedBeatmap]
@@ -47,19 +47,23 @@ beat_weaver/
 
 tests/
 ├── __init__.py
-├── test_audio.py                       # Audio preprocessing tests (12 tests, skipped without [ml])
+├── test_audio.py                       # Audio preprocessing + onset tests (15 tests, skipped without [ml])
+├── test_beatsaver_scores.py            # BeatSaver score persistence tests (3 tests)
+├── test_dataset_filtering.py           # Dataset filtering, SpecAugment, cache versioning (12 tests, skipped without [ml])
 ├── test_evaluate.py                    # Evaluation metrics tests (19 tests)
 ├── test_exporter.py                    # Map export tests (4 tests, skipped without [ml])
 ├── test_inference.py                   # Grammar mask + generation tests (12 tests, skipped without [ml])
-├── test_model.py                       # Transformer forward/backward tests (9 tests, skipped without [ml])
+├── test_model.py                       # Transformer forward/backward + RoPE + onset tests (17 tests, skipped without [ml])
 ├── test_parsers.py                     # Info/beatmap parser tests (11 tests)
 ├── test_schemas.py                     # Schema & version parsing tests (16 tests)
 ├── test_tokenizer.py                   # Tokenizer encode/decode tests (26 tests)
+├── test_training.py                    # Color balance loss tests (4 tests, skipped without [ml])
 ├── test_weighted_sampler.py            # Source weighting tests (9 tests, skipped without [ml])
 └── test_writer.py                     # Parquet writer tests: row groups, file splitting, reader (13 tests)
 
 configs/
-└── small.json                         # Small model config (1M params, batch_size=32, 2 layers, dim=128)
+├── small.json                         # Small model config (1M params, batch_size=32, 2 layers, dim=128)
+└── medium.json                        # Medium model config (6.5M params, 4L/256d, seq_len=4096, Expert+, onset features)
 ```
 
 ## Core Dataclasses (`beat_weaver/schemas/normalized.py`)
@@ -186,7 +190,7 @@ build-backend = "setuptools.build_meta"
 - `data/processed/bombs_NNNN.parquet` — bombs with position data (same numbering scheme)
 - `data/processed/obstacles_NNNN.parquet` — walls with duration/dimensions
 - `data/processed/metadata.json` — Song-level metadata (list of dicts)
-- `data/processed/mel_cache/` — Pre-computed mel spectrograms (`{song_hash}_{bpm}.npy`)
+- `data/processed/mel_cache/` — Pre-computed mel spectrograms (`{song_hash}_{bpm}.npy`) + `VERSION` file for cache invalidation
 - `data/audio_manifest.json` — Maps song_hash → audio file path
 
 Reader `read_notes_parquet(path)` handles: directory with `notes_*.parquet`, legacy `notes.parquet`, or direct file path.

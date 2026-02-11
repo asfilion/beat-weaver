@@ -14,6 +14,7 @@ from beat_weaver.model.audio import (
     beat_align_spectrogram,
     build_audio_manifest,
     compute_mel_spectrogram,
+    compute_mel_with_onset,
     compute_onset_envelope,
     detect_bpm,
     load_audio,
@@ -164,3 +165,31 @@ class TestAudioManifest:
         assert len(manifest) == 1
         audio_path = list(manifest.values())[0]
         assert Path(audio_path).exists()
+
+
+class TestMelWithOnset:
+    def test_shape(self, sine_wave_file):
+        """Output has n_mels+1 channels."""
+        path, sr, _ = sine_wave_file
+        audio, _ = load_audio(path, sr=sr)
+        mel = compute_mel_with_onset(audio, sr=sr, n_mels=80, hop_length=512)
+        assert mel.shape[0] == 81  # 80 mel + 1 onset
+        assert mel.shape[1] > 0
+        assert mel.dtype == np.float32
+
+    def test_onset_channel_nonnegative(self, sine_wave_file):
+        """Onset strength channel is non-negative."""
+        path, sr, _ = sine_wave_file
+        audio, _ = load_audio(path, sr=sr)
+        mel = compute_mel_with_onset(audio, sr=sr, n_mels=80)
+        onset_channel = mel[80, :]  # Last row is onset
+        assert np.all(onset_channel >= 0)
+
+    def test_onset_beat_aligned_shape(self, sine_wave_file):
+        """Beat-aligned onset+mel has correct shape."""
+        path, sr, _ = sine_wave_file
+        audio, _ = load_audio(path, sr=sr)
+        mel = compute_mel_with_onset(audio, sr=sr, n_mels=80, hop_length=512)
+        aligned = beat_align_spectrogram(mel, sr=sr, hop_length=512, bpm=120.0)
+        assert aligned.shape[0] == 81  # n_mels+1 preserved
+        assert aligned.shape[1] > 0
