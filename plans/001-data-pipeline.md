@@ -4,9 +4,9 @@
 
 We need to transform existing Beat Saber tracks into usable ML training data. There are three data sources with different access methods: local custom levels (plain JSON, trivial), BeatSaver community maps (bulk download via API, ~20k+ maps), and official/DLC maps (locked in Unity asset bundles, need extraction). This plan covers building a Python pipeline to access, parse, normalize, and store map data from all three sources.
 
-## Pre-Step: Update LEARNINGS.md
+## Pre-Step: Update RESEARCH.md
 
-Append new findings from this research round to `LEARNINGS.md`:
+Append new findings from this research round to `RESEARCH.md`:
 - Local installation structure (what's actually in the Beat Saber directory)
 - Official maps stored in `StreamingAssets/aa/StandaloneWindows64/` as `.bundle` files and `BeatmapLevelsData/` binary files
 - Built-in levels ("Beat Saber" and "Magic") already in CustomLevels/ as v2 JSON

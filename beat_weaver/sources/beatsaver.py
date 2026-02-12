@@ -34,7 +34,7 @@ class BeatSaverClient:
 
         Default filters (score >= 0.75, upvotes >= 5, automapper=False)
         yield ~55,000 maps from ~115,000 total on BeatSaver. See
-        LEARNINGS.md "Training Data Quality Analysis" for rationale.
+        RESEARCH.md "Training Data Quality Analysis" for rationale.
         """
         total_found = 0
         page = 0
