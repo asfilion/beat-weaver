@@ -27,7 +27,7 @@
   "density_loss_weight": 0.1,
   "color_balance_weight": 0.1,
   "use_onset_features": true,
-  "use_rope": false,
+  "use_rope": true,
   "min_difficulty": "Expert",
   "characteristics": ["Standard"],
   "min_bpm": 50.0,

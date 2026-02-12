@@ -58,7 +58,7 @@ class ModelConfig:
     use_onset_features: bool = False  # Concatenate onset strength as extra mel channel
 
     # Positional encoding
-    use_rope: bool = False  # Use RoPE instead of sinusoidal PE
+    use_rope: bool = True  # Use RoPE instead of sinusoidal PE
 
     # Auxiliary losses
     density_loss_weight: float = 0.1
