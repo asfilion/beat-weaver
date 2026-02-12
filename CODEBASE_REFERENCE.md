@@ -14,8 +14,8 @@ beat_weaver/
 │   ├── config.py                        # ModelConfig dataclass with all hyperparameters
 │   ├── dataset.py                       # PyTorch Dataset: Parquet + audio → (mel, tokens, mask)
 │   ├── evaluate.py                      # Quality metrics: onset F1, NPS accuracy, parity, diversity
-│   ├── exporter.py                      # Token sequence → playable v2 Beat Saber map folder
-│   ├── inference.py                     # Autoregressive generation with grammar-constrained decoding
+│   ├── exporter.py                      # Token sequence or note list → playable v2 Beat Saber map folder
+│   ├── inference.py                     # Autoregressive generation with grammar mask + windowed full-song generation
 │   ├── tokenizer.py                     # Token vocabulary (291), encode/decode beatmap ↔ tokens
 │   ├── training.py                      # Training loop: mixed-precision, checkpointing, early stopping, color balance loss
 │   └── transformer.py                   # AudioEncoder + TokenDecoder + BeatWeaverModel (sinusoidal PE or RoPE)
@@ -51,8 +51,8 @@ tests/
 ├── test_beatsaver_scores.py            # BeatSaver score persistence tests (3 tests)
 ├── test_dataset_filtering.py           # Dataset filtering, SpecAugment, cache versioning (12 tests, skipped without [ml])
 ├── test_evaluate.py                    # Evaluation metrics tests (19 tests)
-├── test_exporter.py                    # Map export tests (4 tests, skipped without [ml])
-├── test_inference.py                   # Grammar mask + generation tests (12 tests, skipped without [ml])
+├── test_exporter.py                    # Map export tests (6 tests, skipped without [ml])
+├── test_inference.py                   # Grammar mask + generation + full-song tests (16 tests, skipped without [ml])
 ├── test_model.py                       # Transformer forward/backward + RoPE + onset tests (17 tests, skipped without [ml])
 ├── test_parsers.py                     # Info/beatmap parser tests (11 tests)
 ├── test_schemas.py                     # Schema & version parsing tests (16 tests)

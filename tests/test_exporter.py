@@ -7,7 +7,7 @@ import pytest
 np = pytest.importorskip("numpy")
 sf = pytest.importorskip("soundfile")
 
-from beat_weaver.model.exporter import export_map
+from beat_weaver.model.exporter import export_map, export_notes
 from beat_weaver.model.tokenizer import (
     BAR,
     DIFF_EXPERT,
@@ -20,6 +20,7 @@ from beat_weaver.model.tokenizer import (
     LEFT_BASE,
     RIGHT_BASE,
 )
+from beat_weaver.schemas.normalized import Note
 
 
 @pytest.fixture
@@ -107,4 +108,44 @@ class TestExportMap:
                   audio_path=audio_file, output_dir=output)
 
         dat = json.loads((output / "Expert.dat").read_text())
+        assert dat["_notes"] == []
+
+
+class TestExportNotes:
+    def test_export_notes_creates_valid_map(self, tmp_path, audio_file):
+        """export_notes produces valid v2 map files from a note list."""
+        notes = [
+            Note(beat=0.0, time_seconds=0.0, x=1, y=0, color=0, cut_direction=1),
+            Note(beat=0.5, time_seconds=0.25, x=2, y=1, color=1, cut_direction=0),
+            Note(beat=4.0, time_seconds=2.0, x=3, y=2, color=0, cut_direction=3),
+        ]
+        output = tmp_path / "notes_map"
+        result = export_notes(notes, bpm=120.0, song_name="Test Notes",
+                              audio_path=audio_file, output_dir=output)
+
+        assert (result / "Info.dat").exists()
+        assert (result / "Expert.dat").exists()
+        assert (result / "song.ogg").exists()
+
+        info = json.loads((result / "Info.dat").read_text())
+        assert info["_songName"] == "Test Notes"
+        assert info["_beatsPerMinute"] == 120.0
+
+        dat = json.loads((result / "Expert.dat").read_text())
+        assert len(dat["_notes"]) == 3
+        # Notes should be sorted by time
+        times = [n["_time"] for n in dat["_notes"]]
+        assert times == sorted(times)
+        # Check first note
+        assert dat["_notes"][0]["_lineIndex"] == 1
+        assert dat["_notes"][0]["_type"] == 0
+        assert dat["_notes"][0]["_cutDirection"] == 1
+
+    def test_export_notes_empty(self, tmp_path, audio_file):
+        """export_notes handles an empty note list."""
+        output = tmp_path / "empty_notes_map"
+        result = export_notes([], bpm=120.0, song_name="Empty",
+                              audio_path=audio_file, output_dir=output)
+
+        dat = json.loads((result / "Expert.dat").read_text())
         assert dat["_notes"] == []

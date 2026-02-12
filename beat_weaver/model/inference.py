@@ -21,9 +21,11 @@ from beat_weaver.model.tokenizer import (
     RIGHT_EMPTY,
     START,
     VOCAB_SIZE,
+    decode_tokens,
     difficulty_to_token,
 )
 from beat_weaver.model.transformer import BeatWeaverModel
+from beat_weaver.schemas.normalized import Note
 
 
 def _build_grammar_mask(last_token: int, last_pos_in_bar: int = -1) -> torch.Tensor:
@@ -194,3 +196,116 @@ def generate(
             break
 
     return tokens
+
+
+def generate_full_song(
+    model: BeatWeaverModel,
+    mel_spectrogram: torch.Tensor,
+    difficulty: str,
+    config: ModelConfig,
+    bpm: float,
+    temperature: float = 1.0,
+    top_k: int = 0,
+    top_p: float = 1.0,
+    seed: int | None = None,
+) -> list[Note]:
+    """Generate a complete Beat Saber map by processing audio in overlapping windows.
+
+    For short audio that fits in a single window, this is equivalent to calling
+    generate() + decode_tokens(). For longer audio, the mel is split into
+    overlapping windows, each generating a token sequence that is decoded to
+    notes and merged using midpoint ownership in the overlap zones.
+
+    Args:
+        model: Trained BeatWeaverModel.
+        mel_spectrogram: (n_mels, T_audio) — full beat-aligned spectrogram.
+        difficulty: Difficulty name (e.g., "Expert").
+        config: Model configuration.
+        bpm: Song BPM (needed for beat offset calculation and token decoding).
+        temperature: Sampling temperature.
+        top_k: Top-k filtering (0 = disabled).
+        top_p: Top-p / nucleus filtering (1.0 = disabled).
+        seed: Random seed for reproducibility.
+
+    Returns:
+        List of Note objects spanning the full song, sorted by beat.
+    """
+    total_frames = mel_spectrogram.shape[1]
+    max_len = config.max_audio_len
+
+    # Single window — generate directly
+    if total_frames <= max_len:
+        tokens = generate(
+            model, mel_spectrogram, difficulty, config,
+            temperature=temperature, top_k=top_k, top_p=top_p, seed=seed,
+        )
+        return decode_tokens(tokens, bpm)
+
+    # Multi-window generation
+    overlap = min(max_len // 4, 1024)
+    stride = max_len - overlap
+
+    # Compute window start positions
+    starts: list[int] = []
+    pos = 0
+    while pos < total_frames:
+        starts.append(pos)
+        if pos + max_len >= total_frames:
+            break
+        pos += stride
+
+    all_window_notes: list[tuple[int, list[Note]]] = []
+
+    for i, start in enumerate(starts):
+        end = start + max_len
+        window_mel = mel_spectrogram[:, start:end]
+
+        # Zero-pad last window if needed
+        if window_mel.shape[1] < max_len:
+            pad_size = max_len - window_mel.shape[1]
+            window_mel = torch.nn.functional.pad(window_mel, (0, pad_size))
+
+        # Use different seed per window for variety (if seed provided)
+        window_seed = seed + i if seed is not None else None
+
+        tokens = generate(
+            model, window_mel, difficulty, config,
+            temperature=temperature, top_k=top_k, top_p=top_p, seed=window_seed,
+        )
+
+        # Decode tokens — notes have beats relative to window start (bar 0)
+        window_notes = decode_tokens(tokens, bpm)
+
+        # Offset all beats by the window's start position in frames
+        # Each frame = 1/16th note subdivision, beat = frame / 16
+        beat_offset = start / 16.0
+        for note in window_notes:
+            note.beat += beat_offset
+            note.time_seconds = note.beat * 60.0 / bpm
+
+        all_window_notes.append((start, window_notes))
+
+    # Merge with midpoint ownership — each window owns notes up to the
+    # midpoint of its overlap with the next window, and from the midpoint
+    # of its overlap with the previous window.
+    result: list[Note] = []
+    for i, (start, notes) in enumerate(all_window_notes):
+        min_beat = 0.0
+        max_beat = float("inf")
+
+        if i > 0:
+            prev_start = all_window_notes[i - 1][0]
+            # Overlap zone between prev and current: [start, prev_start + max_len)
+            overlap_mid_frame = (start + prev_start + max_len) / 2.0
+            min_beat = overlap_mid_frame / 16.0
+
+        if i < len(all_window_notes) - 1:
+            next_start = all_window_notes[i + 1][0]
+            # Overlap zone between current and next: [next_start, start + max_len)
+            overlap_mid_frame = (next_start + start + max_len) / 2.0
+            max_beat = overlap_mid_frame / 16.0
+
+        result.extend(n for n in notes if min_beat <= n.beat < max_beat)
+
+    result.sort(key=lambda n: (n.beat, n.color))
+    return result

@@ -160,11 +160,12 @@ def cmd_train(args: argparse.Namespace) -> None:
 def cmd_generate(args: argparse.Namespace) -> None:
     import torch
     from beat_weaver.model.audio import (
-        compute_mel_spectrogram, compute_mel_with_onset, detect_bpm, load_audio,
+        beat_align_spectrogram, compute_mel_spectrogram, compute_mel_with_onset,
+        detect_bpm, load_audio,
     )
     from beat_weaver.model.config import ModelConfig
-    from beat_weaver.model.exporter import export_map
-    from beat_weaver.model.inference import generate
+    from beat_weaver.model.exporter import export_notes
+    from beat_weaver.model.inference import generate_full_song
     from beat_weaver.model.transformer import BeatWeaverModel
 
     ckpt_dir = Path(args.checkpoint)
@@ -189,20 +190,22 @@ def cmd_generate(args: argparse.Namespace) -> None:
     else:
         mel = compute_mel_spectrogram(audio, sr=sr, n_mels=config.n_mels,
                                       n_fft=config.n_fft, hop_length=config.hop_length)
-    if mel.shape[1] > config.max_audio_len:
-        mel = mel[:, :config.max_audio_len]
+
+    # Beat-align to match training data preprocessing
+    mel = beat_align_spectrogram(mel, sr=sr, hop_length=config.hop_length, bpm=bpm)
     mel_tensor = torch.from_numpy(mel)
 
-    tokens = generate(
-        model, mel_tensor, args.difficulty, config,
+    notes = generate_full_song(
+        model, mel_tensor, args.difficulty, config, bpm,
         temperature=args.temperature,
         seed=args.seed,
     )
+    n_windows = max(1, (mel.shape[1] - 1) // (config.max_audio_len - min(config.max_audio_len // 4, 1024)) + 1) if mel.shape[1] > config.max_audio_len else 1
 
     song_name = Path(args.audio).stem
     output = Path(args.output) if args.output else Path(f"output/{song_name}")
-    export_map(tokens, bpm, song_name, Path(args.audio), output, args.difficulty)
-    print(f"Generated map: {output}")
+    export_notes(notes, bpm, song_name, Path(args.audio), output, args.difficulty)
+    print(f"Generated map: {output} ({n_windows} window(s), {len(notes)} notes)")
 
 
 def cmd_evaluate(args: argparse.Namespace) -> None:
