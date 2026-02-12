@@ -2,7 +2,7 @@
 
 ## Context
 
-The data pipeline is complete (PR #1, merged). We have parsers for v2/v3/v4 Beat Saber maps, BeatSaver downloader, Unity extractor, and Parquet storage. Research is complete (PR #2, merged) with decisions documented in LEARNINGS.md and CLAUDE.md.
+The data pipeline is complete (PR #1, merged). We have parsers for v2/v3/v4 Beat Saber maps, BeatSaver downloader, Unity extractor, and Parquet storage. Research is complete (PR #2, merged) with decisions documented in RESEARCH.md and CLAUDE.md.
 
 **Goal:** Build an encoder-decoder transformer that takes audio + difficulty as input and generates a sequence of Beat Saber color note tokens. The model outputs beat-quantized compound tokens (~290 vocab) that map 1:1 to v2 Beat Saber JSON.
 
@@ -289,7 +289,7 @@ Accept optional `seed: int` for reproducible generation via `torch.manual_seed`.
 ### Existing Code to Reuse
 
 - `beat_weaver.schemas.normalized.Note` — decoded note dataclass
-- v2 JSON field mapping documented in LEARNINGS.md (beat→_time, x→_lineIndex, y→_lineLayer, color→_type, cut_direction→_cutDirection)
+- v2 JSON field mapping documented in RESEARCH.md (beat→_time, x→_lineIndex, y→_lineLayer, color→_type, cut_direction→_cutDirection)
 
 ## Phase 9: Evaluation (`model/evaluate.py`)
 

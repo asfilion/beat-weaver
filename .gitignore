@@ -1,4 +1,5 @@
 data/
+output/
 *.egg-info/
 __pycache__/
 *.pyc
@@ -8,3 +9,4 @@ build/
 *.egg
 .pytest_cache/
 .claude/settings.local.json
+resume_training.txt

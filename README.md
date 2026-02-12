@@ -90,7 +90,7 @@ Audio (mel spectrogram + onset) → [Audio Encoder] → [Token Decoder] → Toke
 - **Inference:** Autoregressive generation with grammar constraints ensuring valid map structure
 - **Configs:** Small (1M params), medium (6.5M params, 8GB VRAM), default (44.5M params)
 
-See [LEARNINGS.md](LEARNINGS.md) for research details and [plans/](plans/) for implementation plans.
+See [RESEARCH.md](RESEARCH.md) for research details and [plans/](plans/) for implementation plans.
 
 ## Project Status
 
