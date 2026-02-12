@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 from beat_weaver.model.tokenizer import decode_tokens
+from beat_weaver.schemas.normalized import Note
 
 # NJS lookup by difficulty
 _NJS_TABLE = {
@@ -127,6 +128,47 @@ def export_map(
     (output_dir / "Info.dat").write_text(json.dumps(info, indent=2))
 
     # Write difficulty file
+    diff_dat = _build_difficulty_dat(notes)
+    (output_dir / f"{difficulty}.dat").write_text(json.dumps(diff_dat, indent=2))
+
+    return output_dir
+
+
+def export_notes(
+    notes: list[Note],
+    bpm: float,
+    song_name: str,
+    audio_path: Path,
+    output_dir: Path,
+    difficulty: str = "Expert",
+) -> Path:
+    """Export a note list to a playable v2 Beat Saber map folder.
+
+    Unlike export_map() which takes token IDs, this takes pre-decoded notes
+    (e.g. from windowed generation where notes have already been merged).
+
+    Args:
+        notes: List of Note objects.
+        bpm: Song BPM.
+        song_name: Display name for the song.
+        audio_path: Path to the audio file.
+        output_dir: Where to create the map folder.
+        difficulty: Difficulty name.
+
+    Returns:
+        Path to the created map folder.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    audio_path = Path(audio_path)
+    audio_filename = f"song{audio_path.suffix}"
+    dest_audio = output_dir / audio_filename
+    shutil.copy2(audio_path, dest_audio)
+
+    info = _build_info_dat(song_name, bpm, difficulty, audio_filename)
+    (output_dir / "Info.dat").write_text(json.dumps(info, indent=2))
+
     diff_dat = _build_difficulty_dat(notes)
     (output_dir / f"{difficulty}.dat").write_text(json.dumps(diff_dat, indent=2))
 

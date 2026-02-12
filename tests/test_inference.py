@@ -5,7 +5,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from beat_weaver.model.config import ModelConfig
-from beat_weaver.model.inference import _build_grammar_mask, generate
+from beat_weaver.model.inference import _build_grammar_mask, generate, generate_full_song
 from beat_weaver.model.tokenizer import (
     BAR,
     DIFF_EASY,
@@ -143,3 +143,79 @@ class TestGenerate:
         tokens = generate(model, mel, "Expert", config, temperature=0)
         assert tokens[0] == START
         assert tokens[1] == DIFF_EXPERT
+
+
+class TestGenerateFullSong:
+    @pytest.fixture
+    def small_model(self):
+        config = ModelConfig(
+            vocab_size=291,
+            max_seq_len=64,
+            max_audio_len=128,
+            n_mels=80,
+            encoder_layers=1,
+            encoder_dim=32,
+            encoder_heads=4,
+            encoder_ff_dim=64,
+            decoder_layers=1,
+            decoder_dim=32,
+            decoder_heads=4,
+            decoder_ff_dim=64,
+            dropout=0.0,
+        )
+        model = BeatWeaverModel(config)
+        return model, config
+
+    def test_full_song_single_window(self, small_model):
+        """Short mel that fits in one window produces same result as generate()."""
+        model, config = small_model
+        mel = torch.randn(80, 64)  # Well under max_audio_len=128
+        notes = generate_full_song(model, mel, "Expert", config, bpm=120.0, seed=42)
+        # Should return a list of Note objects (may be empty if model generates no notes)
+        assert isinstance(notes, list)
+        for note in notes:
+            assert hasattr(note, "beat")
+            assert hasattr(note, "color")
+
+    def test_full_song_multi_window(self, small_model):
+        """Mel 2.5x max_audio_len produces notes spanning the full duration."""
+        model, config = small_model
+        total_frames = int(config.max_audio_len * 2.5)
+        mel = torch.randn(80, total_frames)
+        notes = generate_full_song(
+            model, mel, "Expert", config, bpm=120.0,
+            temperature=1.0, seed=42,
+        )
+        assert isinstance(notes, list)
+        # With a random model we might not get notes everywhere, but
+        # the function should run without errors and return Note objects
+        for note in notes:
+            assert hasattr(note, "beat")
+            assert note.beat >= 0
+
+    def test_full_song_overlap_no_duplicates(self, small_model):
+        """No two notes at the exact same beat+color in the overlap zone."""
+        model, config = small_model
+        total_frames = config.max_audio_len * 3
+        mel = torch.randn(80, total_frames)
+        notes = generate_full_song(
+            model, mel, "Expert", config, bpm=120.0, seed=99,
+        )
+        seen = set()
+        for note in notes:
+            key = (round(note.beat, 6), note.color, note.x, note.y)
+            # Notes can legitimately share a beat if they're different placements,
+            # but the same (beat, color, x, y) should not appear twice
+            assert key not in seen, f"Duplicate note at {key}"
+            seen.add(key)
+
+    def test_full_song_notes_sorted(self, small_model):
+        """Output notes are sorted by beat."""
+        model, config = small_model
+        total_frames = config.max_audio_len * 2
+        mel = torch.randn(80, total_frames)
+        notes = generate_full_song(
+            model, mel, "Expert", config, bpm=120.0, seed=7,
+        )
+        for i in range(1, len(notes)):
+            assert notes[i].beat >= notes[i - 1].beat

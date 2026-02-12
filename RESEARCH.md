@@ -57,6 +57,9 @@ This document is the project's curated knowledge base, capturing research findin
 - [Hardware Constraints](#hardware-constraints-rtx-4070-8gb-vram-32gb-ram) — What's feasible on 4070 vs better hardware
 - [Prioritized Improvement Roadmap](#prioritized-improvement-roadmap) — Tier 1/2/3 recommendations
 
+### Full-Song Generation
+- [Full-Song Windowed Generation](#full-song-windowed-generation) — Overlapping window inference for songs of any length
+
 ---
 
 ## File Format Overview
@@ -1106,3 +1109,62 @@ VRAM bottleneck is cross-attention maps: `batch × heads × seq_len × audio_len
 10. Conformer encoder (conv + attention)
 11. Curriculum learning (Expert pretrain → all-difficulty finetune)
 12. Focal loss for token class imbalance
+
+---
+
+## Full-Song Windowed Generation
+
+Implemented February 2026 to generate complete Beat Saber maps for songs of any length, overcoming the `max_audio_len` truncation limit.
+
+### Problem
+
+The model accepts at most `max_audio_len` spectrogram frames (e.g. 4096 for medium config). Beat-aligned, this covers ~64 bars (~128s at 120 BPM). Most songs are 3-5 minutes, so generated maps abruptly stopped partway through. Additionally, `cmd_generate` had a pre-existing bug: it skipped beat-alignment, creating a train/inference mismatch.
+
+### Key Insight: Beat-Aligned Frame ↔ Token Correspondence
+
+Beat-aligned spectrograms have a clean 1:1 mapping with the token grid:
+- Each frame = one 1/16th note subdivision
+- BAR token = 64 frames (4 beats × 16 subdivisions)
+- 4096 frames = 64 bars of music
+- Frame offset → beat offset: `beat = frame / 16`
+
+This makes windowing and stitching straightforward — no fuzzy time alignment needed.
+
+### Algorithm: Overlapping Windows with Midpoint Ownership
+
+`generate_full_song()` in `inference.py`:
+
+1. **Single window shortcut:** If mel fits in `max_audio_len`, call `generate()` directly + decode
+2. **Window computation:**
+   - `overlap = min(max_audio_len // 4, 1024)` frames (~16 bars)
+   - `stride = max_audio_len - overlap`
+   - Window starts: `[0, stride, 2*stride, ...]`, last window extends to cover remaining audio
+3. **Per-window generation:**
+   - Extract `mel[:, start:start+max_audio_len]`, zero-pad last window if short
+   - `generate()` → token sequence → `decode_tokens()` → notes relative to bar 0
+   - Offset all note beats by `start / 16.0`
+   - Per-window seed variation when seed provided (`seed + window_index`)
+4. **Merge with midpoint ownership:**
+   - For adjacent windows A (start=s_a) and B (start=s_b), the overlap zone is `[s_b, s_a + max_len)`
+   - Ownership boundary = midpoint of overlap zone: `(s_b + s_a + max_len) / 2`
+   - Window A keeps notes with `beat < boundary`, window B keeps `beat >= boundary`
+   - Middle windows have both a min_beat and max_beat boundary
+5. **Output:** Merged note list sorted by `(beat, color)`
+
+### Bug Fix: Beat-Alignment in cmd_generate
+
+Training data is always beat-aligned via `beat_align_spectrogram()`, but `cmd_generate` was feeding raw (non-beat-aligned) spectrograms. This caused a train/inference mismatch where frame positions didn't correspond to beat subdivisions. Fixed by adding `beat_align_spectrogram(mel, sr, hop_length, bpm)` after mel computation.
+
+### New Functions
+
+| Function | File | Purpose |
+|----------|------|---------|
+| `generate_full_song()` | `inference.py` | Windowed generation + overlap merging → `list[Note]` |
+| `export_notes()` | `exporter.py` | Write note list to v2 map folder (skips token decoding) |
+
+### Design Decisions
+
+- **25% overlap (capped at 1024 frames):** Provides ~16 bars of musical context at the boundary. Enough for the model to establish rhythm and patterns before the ownership boundary, without excessive redundant computation.
+- **Midpoint ownership:** Simple and symmetric. Each window "owns" notes from the middle of the overlap with its predecessor to the middle of the overlap with its successor. Avoids both duplicates and gaps.
+- **Zero-padding last window:** Rather than generating a short final window (which might produce weird output due to length mismatch with training), pad to full `max_audio_len` and let the model generate normally. Notes beyond the actual audio end are naturally filtered by ownership boundaries.
+- **Per-window seed variation:** `seed + i` ensures each window produces different patterns while remaining reproducible.
