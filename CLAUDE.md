@@ -72,7 +72,7 @@ See [RESEARCH.md](RESEARCH.md) for research details, [plans/002-ml-model.md](pla
 
 - **Architecture:** Encoder-decoder transformer (44.5M default, 6.5M medium, 1M small)
 - **Audio input:** Log-mel spectrogram (80 bins, sr=22050, hop=512), beat-aligned to 1/16th note grid. Optional onset strength channel (+1 bin).
-- **Positional encoding:** Sinusoidal (default) or RoPE (config.use_rope). RoPE applied to self-attention Q/K only (not cross-attention).
+- **Positional encoding:** RoPE (default) or sinusoidal (config.use_rope=False). RoPE applied to self-attention Q/K only (not cross-attention).
 - **Scope:** Color notes only (no bombs, walls, arcs, chains until core model performs well)
 - **Output:** Beat-quantized compound tokens (291 vocab) → v2 Beat Saber JSON
 - **Token format:** `START DIFF BAR POS LEFT RIGHT ... BAR ... END`
@@ -92,7 +92,7 @@ Best model after 16 epochs: **val_loss=2.055, 60.6% token accuracy**. Model plat
 
 ## Open Questions
 
-- **Medium model training:** Ready to train with `configs/medium.json` — 6.5M params, Expert+ only, onset features, fits 8GB VRAM
-- **RoPE evaluation:** RoPE implemented but disabled by default (use_rope=False). Enable and compare against sinusoidal PE.
+- **Medium model training:** Ready to train with `configs/medium.json` — 6.5M params, Expert+ only, onset features, RoPE enabled, fits 8GB VRAM
+- **RoPE evaluation:** RoPE now default for all configs. Compare against sinusoidal PE baseline after training.
 - **Feedback capture system:** In-game mechanism to collect player feedback (later phase)
 - **RL fine-tuning:** After supervised pretraining, fine-tune with player feedback reward model

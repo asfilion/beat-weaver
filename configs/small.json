@@ -24,5 +24,6 @@
   "gradient_accumulation_steps": 1,
   "early_stopping_patience": 10,
   "official_ratio": 0.2,
-  "density_loss_weight": 0.1
+  "density_loss_weight": 0.1,
+  "use_rope": true
 }
