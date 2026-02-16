@@ -103,10 +103,10 @@ See [RESEARCH.md](RESEARCH.md) for research details and [plans/](plans/) for imp
 ## Tests
 
 ```bash
-# Run all tests (158 total; ML tests auto-skip without ML deps)
+# Run all tests (178 total; ML tests auto-skip without ML deps)
 python -m pytest tests/ -v
 ```
 
 ## License
 
-TBD
+[MIT](LICENSE)
