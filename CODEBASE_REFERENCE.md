@@ -18,7 +18,7 @@ beat_weaver/
 │   ├── inference.py                     # Autoregressive generation with grammar mask + windowed full-song generation
 │   ├── tokenizer.py                     # Token vocabulary (291), encode/decode beatmap ↔ tokens
 │   ├── training.py                      # Training loop: mixed-precision, checkpointing, early stopping, color balance loss
-│   └── transformer.py                   # AudioEncoder + TokenDecoder + BeatWeaverModel (sinusoidal PE or RoPE)
+│   └── transformer.py                   # AudioEncoder (Conformer or Transformer) + TokenDecoder + BeatWeaverModel
 ├── parsers/
 │   ├── __init__.py
 │   ├── beatmap_parser.py               # Top-level: parse_map_folder(path) → list[NormalizedBeatmap]
@@ -53,7 +53,7 @@ tests/
 ├── test_evaluate.py                    # Evaluation metrics tests (19 tests)
 ├── test_exporter.py                    # Map export tests (6 tests, skipped without [ml])
 ├── test_inference.py                   # Grammar mask + generation + full-song tests (16 tests, skipped without [ml])
-├── test_model.py                       # Transformer forward/backward + RoPE + onset tests (17 tests, skipped without [ml])
+├── test_model.py                       # Transformer/Conformer forward/backward + RoPE + onset tests (26 tests, skipped without [ml])
 ├── test_parsers.py                     # Info/beatmap parser tests (11 tests)
 ├── test_schemas.py                     # Schema & version parsing tests (16 tests)
 ├── test_tokenizer.py                   # Tokenizer encode/decode tests (26 tests)
@@ -63,7 +63,8 @@ tests/
 
 configs/
 ├── small.json                         # Small model config (1M params, batch_size=32, 2 layers, dim=128)
-└── medium.json                        # Medium model config (6.5M params, 4L/256d, seq_len=4096, Expert+, onset features)
+├── medium.json                        # Medium model config (6.5M params, 4L/256d, seq_len=4096, Expert+, onset features)
+└── medium_conformer.json              # Medium Conformer config (9.4M params, Conformer encoder, LR=3e-5)
 ```
 
 ## Core Dataclasses (`beat_weaver/schemas/normalized.py`)

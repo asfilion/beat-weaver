@@ -1106,7 +1106,7 @@ VRAM bottleneck is cross-attention maps: `batch × heads × seq_len × audio_len
 9. Replace sinusoidal PE with RoPE
 
 **Tier 3 — Later (research-grade):**
-10. Conformer encoder (conv + attention)
+10. ~~Conformer encoder (conv + attention)~~ ✓ Implemented — now default encoder, training in progress
 11. Curriculum learning (Expert pretrain → all-difficulty finetune)
 12. Focal loss for token class imbalance
 
@@ -1168,3 +1168,80 @@ Training data is always beat-aligned via `beat_align_spectrogram()`, but `cmd_ge
 - **Midpoint ownership:** Simple and symmetric. Each window "owns" notes from the middle of the overlap with its predecessor to the middle of the overlap with its successor. Avoids both duplicates and gaps.
 - **Zero-padding last window:** Rather than generating a short final window (which might produce weird output due to length mismatch with training), pad to full `max_audio_len` and let the model generate normally. Notes beyond the actual audio end are naturally filtered by ownership boundaries.
 - **Per-window seed variation:** `seed + i` ensures each window produces different patterns while remaining reproducible.
+
+---
+
+## Conformer Audio Encoder
+
+Implemented February 2026. Replaces the pure Transformer encoder with Conformer blocks (Gulati et al., INTERSPEECH 2020) that combine self-attention with depthwise separable convolutions. Now the default encoder architecture (`use_conformer=True`).
+
+### Motivation
+
+The standard Transformer encoder uses only self-attention, which captures global dependencies but misses local temporal patterns (onsets, transients, rhythmic motifs). Convolutions naturally capture these local features. The Conformer architecture, dominant in modern speech models (ESPnet, Whisper-style systems), combines both in a single block.
+
+### Architecture per Conformer Block
+
+```
+Input
+  +-- 0.5 * FFN (LayerNorm -> Linear -> SiLU -> Dropout -> Linear -> Dropout) -- residual
+  +-- Self-Attention (LayerNorm -> RoPE MHSA -> Dropout) -- residual
+  +-- ConvModule (LayerNorm -> Pointwise(2x) -> GLU -> DepthwiseConv -> BatchNorm -> SiLU -> Pointwise -> Dropout) -- residual
+  +-- 0.5 * FFN (same as first) -- residual
+  LayerNorm
+Output
+```
+
+Key design choices:
+- **SiLU (Swish) activation** per the original Conformer paper (not GELU)
+- **Depthwise conv kernel_size=31** — covers ~2 bars of beat-aligned audio, sufficient for local rhythm patterns
+- **GLU gating** in the conv module for learned feature selection
+- **Padding mask handling:** Padded positions zeroed before depthwise conv, after depthwise conv, and after final pointwise conv (BatchNorm would otherwise leak non-zero values into padded positions)
+- **BatchNorm** (not LayerNorm) in the conv module — uses running statistics in eval mode, safe for batch_size=1 during inference
+
+### Parameter Impact (medium config: 4 layers, dim=256, ff=1024)
+
+| Configuration | Encoder Params | Total Model Params |
+|---------------|---------------|-------------------|
+| Standard Transformer | ~3.2M | 6,489,635 |
+| Conformer | ~6.1M | 9,422,371 |
+
+The ~2.9M increase comes from the second FFN (Macaron structure) and the ConvModule per layer. Fits 8GB VRAM at batch_size=8.
+
+### Training Results
+
+**Standard Transformer (LR=1e-4) — diverged:**
+
+| Epoch | Train Loss | Val Loss | Val Acc |
+|-------|-----------|----------|---------|
+| 1 | 4.263 | 10.435 | 12.5% |
+| 4 | 2.065 | 5.263 | 27.9% |
+| 7 | 1.994 | 13.426 | 25.4% |
+
+Train loss decreased but val loss exploded after epoch 4 — LR too aggressive for the 6.5M param model.
+
+**Conformer (LR=3e-5, warmup=1000) — stable and improving:**
+
+| Epoch | Train Loss | Val Loss | Val Acc | Time |
+|-------|-----------|----------|---------|------|
+| 1 | 4.046 | 3.277 | 37.8% | 2342s |
+| 2 | 2.784 | 2.728 | 49.5% | 2367s |
+| 3 | 2.491 | 2.596 | 51.6% | 2322s |
+| 4 | 2.341 | 2.530 | 52.1% | 2239s |
+| 5 | 2.269 | 2.470 | 53.0% | 2263s |
+| 6 | 2.222 | 2.452 | 52.2% | 2122s |
+| 7 | 2.189 | 2.396 | 53.6% | 2364s |
+
+Val loss steadily decreasing with no divergence. At epoch 7 the Conformer already achieves 53.6% accuracy — on track to surpass the small model's 60.6% peak (reached at epoch 13-16). Training is ongoing.
+
+### Key Findings
+
+1. **LR scaling for larger models:** 1e-4 (used for 1M small model) is too aggressive for 6.5M+ param models. 3e-5 with 1000 warmup steps stabilizes training. The divergence pattern (train loss drops, val loss explodes) is optimization instability, not overfitting.
+
+2. **Conformer vs Transformer stability:** The Conformer's conv module may provide implicit regularization through local feature extraction, contributing to more stable training alongside the lower LR.
+
+3. **Epoch time:** ~39 min/epoch with Conformer (9.4M params, batch_size=8, gradient_accumulation=4) vs ~10 min/epoch with small model (1M params, batch_size=32). Proportional to the param count increase and sequence length (4096 vs 1024).
+
+### Config Files
+
+- `configs/medium.json` — Standard transformer, 6.5M params, LR=3e-5
+- `configs/medium_conformer.json` — Conformer encoder, 9.4M params, LR=3e-5, `use_conformer=true`, `conformer_kernel_size=31`
