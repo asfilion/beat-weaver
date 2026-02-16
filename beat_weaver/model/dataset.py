@@ -441,7 +441,11 @@ class BeatSaberDataset(Dataset):
 
     @staticmethod
     def _spec_augment(mel: np.ndarray) -> np.ndarray:
-        """Apply SpecAugment: random time and frequency masking."""
+        """Apply SpecAugment: random time and frequency masking.
+
+        Time mask width scales with sequence length so the masking fraction
+        stays meaningful for long sequences (e.g. 4096 frames).
+        """
         mel = mel.copy()  # Don't mutate cached data
         n_mels, n_frames = mel.shape
         if n_frames == 0:
@@ -451,9 +455,10 @@ class BeatSaberDataset(Dataset):
             f = np.random.randint(1, min(11, n_mels))
             f0 = np.random.randint(0, n_mels - f + 1)
             mel[f0:f0 + f, :] = 0.0
-        # Time masking: 2 bands, width up to 20 frames
+        # Time masking: scale width with sequence length (~2% of frames, min 20, max 100)
+        max_t = max(20, min(100, n_frames // 50))
         for _ in range(2):
-            t = np.random.randint(1, min(21, n_frames))
+            t = np.random.randint(1, min(max_t + 1, n_frames))
             t0 = np.random.randint(0, n_frames - t + 1)
             mel[:, t0:t0 + t] = 0.0
         return mel

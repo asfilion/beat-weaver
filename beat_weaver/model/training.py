@@ -30,7 +30,12 @@ def _get_device() -> torch.device:
 def _build_lr_scheduler(
     optimizer: torch.optim.Optimizer, config: ModelConfig, steps_per_epoch: int,
 ) -> torch.optim.lr_scheduler.LRScheduler:
-    """Cosine LR schedule with linear warmup."""
+    """Cosine LR schedule with linear warmup.
+
+    steps_per_epoch should be the number of *optimizer steps* per epoch
+    (i.e. len(train_loader) // gradient_accumulation_steps), not the raw
+    batch count.
+    """
     total_steps = config.max_epochs * steps_per_epoch
 
     def lr_lambda(step: int) -> float:
@@ -311,9 +316,12 @@ def train(
         persistent_workers=num_workers > 0,
     )
 
-    # Build scheduler after knowing steps_per_epoch
+    # Build scheduler after knowing steps_per_epoch.
+    # The scheduler steps once per optimizer step, which happens every
+    # gradient_accumulation_steps batches (not every batch).
+    optimizer_steps_per_epoch = max(1, len(train_loader) // config.gradient_accumulation_steps)
     trainer.scheduler = _build_lr_scheduler(
-        trainer.optimizer, config, len(train_loader),
+        trainer.optimizer, config, optimizer_steps_per_epoch,
     )
     trainer.restore_scheduler()
 
