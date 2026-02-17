@@ -96,17 +96,18 @@ Best model after 16 epochs: **val_loss=2.055, 60.6% token accuracy**. Model plat
 
 Training diverged after epoch 4 with `learning_rate=1e-4`: train loss dropped (4.26 → 2.0) but val loss exploded (5.26 → 13.4). Root cause: LR too aggressive for the larger model — not overfitting but optimization instability.
 
-### Medium Conformer (9.4M params) — current best
+### Medium Conformer (9.4M params, Expert+ only) — current best
 
-Training with `configs/medium_conformer.json` (LR=3e-5, warmup=1000, batch_size=8). First 7 epochs:
+Training with `configs/medium_conformer.json` (LR=3e-5, warmup=1000, batch_size=8). Best model at epoch 26/50: **val_loss=2.2324, 59.44% token accuracy**. Training continued 10 more epochs with no val loss improvement (early stopping). Train loss continued decreasing, indicating the model began overfitting on the Expert+-only dataset (~18K samples).
 
-| Epoch | Train Loss | Val Loss | Val Acc | Time/epoch |
-|-------|-----------|----------|---------|------------|
-| 1 | 4.046 | 3.277 | 37.8% | ~39 min |
-| 4 | 2.341 | 2.530 | 52.1% | ~37 min |
-| 7 | 2.189 | 2.396 | 53.6% | ~39 min |
+| Epoch | Train Loss | Val Loss | Val Acc |
+|-------|-----------|----------|---------|
+| 1 | 4.046 | 3.277 | 37.8% |
+| 7 | 2.189 | 2.396 | 53.6% |
+| **26** | **—** | **2.232** | **59.4%** |
+| 36 | — | plateau | early stop |
 
-Val loss steadily decreasing with no divergence. Already surpassing the small model's accuracy (53.6% at epoch 7 vs 60.6% at epoch 16) and on track to exceed it. Training is ongoing.
+Comparable to the small model baseline (60.6% on all difficulties) despite training on Expert+ only (~18K samples vs 42K). The larger model with less data hit its ceiling — next step is broadening the data filter.
 
 **Key lesson:** Medium+ models need lower LR (3e-5 vs 1e-4) and longer warmup (1000 vs 500 steps). The Conformer's conv module helps capture local audio patterns (onsets, transients) that pure attention misses.
 
@@ -114,6 +115,6 @@ Val loss steadily decreasing with no divergence. Already surpassing the small mo
 
 ## Open Questions
 
-- **Conformer training completion:** Currently training — expect val_loss < 2.0 and accuracy > 60% based on trajectory
+- **Data filter broadening:** Expert+ only (~18K samples) limits the 9.4M param Conformer. Adding Expert maps would roughly double the dataset.
 - **Feedback capture system:** In-game mechanism to collect player feedback (later phase)
 - **RL fine-tuning:** After supervised pretraining, fine-tune with player feedback reward model

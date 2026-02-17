@@ -98,7 +98,7 @@ See [RESEARCH.md](RESEARCH.md) for research details and [plans/](plans/) for imp
 - **ML model** — complete (tokenizer, audio preprocessing, Conformer/Transformer encoder, training loop, inference, exporter, evaluation)
 - **Baseline training** — complete (small model: 16 epochs, 23K songs, 60.6% token accuracy, generates playable maps)
 - **Model improvements** — complete (dataset filtering, SpecAugment, onset features, RoPE, color balance loss, Conformer encoder)
-- **Conformer training** — in progress (9.4M params, 53.6% accuracy at epoch 7, val loss still decreasing)
+- **Conformer training** — complete (9.4M params, best val_loss=2.23, 59.4% accuracy at epoch 26, Expert+ only)
 
 ## Tests
 

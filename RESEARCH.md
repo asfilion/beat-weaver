@@ -1230,8 +1230,11 @@ Train loss decreased but val loss exploded after epoch 4 — LR too aggressive f
 | 5 | 2.269 | 2.470 | 53.0% | 2263s |
 | 6 | 2.222 | 2.452 | 52.2% | 2122s |
 | 7 | 2.189 | 2.396 | 53.6% | 2364s |
+| ... | ... | ... | ... | ... |
+| **26** | **—** | **2.232** | **59.4%** | **~39 min** |
+| 36 | — | plateau | — | early stop |
 
-Val loss steadily decreasing with no divergence. At epoch 7 the Conformer already achieves 53.6% accuracy — on track to surpass the small model's 60.6% peak (reached at epoch 13-16). Training is ongoing.
+**Best model at epoch 26: val_loss=2.2324, 59.44% accuracy.** Training continued 10 more epochs with no val loss improvement. Train loss continued decreasing after epoch 26, indicating the model began overfitting on the Expert+-only dataset (~18K samples). Comparable to the small model baseline (60.6% on all difficulties / 42K samples) despite training on harder data with fewer samples.
 
 ### Key Findings
 
@@ -1240,6 +1243,8 @@ Val loss steadily decreasing with no divergence. At epoch 7 the Conformer alread
 2. **Conformer vs Transformer stability:** The Conformer's conv module may provide implicit regularization through local feature extraction, contributing to more stable training alongside the lower LR.
 
 3. **Epoch time:** ~39 min/epoch with Conformer (9.4M params, batch_size=8, gradient_accumulation=4) vs ~10 min/epoch with small model (1M params, batch_size=32). Proportional to the param count increase and sequence length (4096 vs 1024).
+
+4. **Data is the bottleneck, not model capacity:** The 9.4M param Conformer plateaued at epoch 26 on ~18K Expert+ samples. Train loss kept decreasing while val loss stalled — classic data-limited overfitting. Broadening the filter to include Expert maps (~15K additional samples) is the next lever.
 
 ### Config Files
 
