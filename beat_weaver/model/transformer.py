@@ -138,6 +138,140 @@ class RoPEMultiHeadAttention(nn.Module):
         return self.out_proj(out)
 
 
+# ── Conformer ─────────────────────────────────────────────────────────────────
+
+
+class ConformerFeedForward(nn.Module):
+    """Half-step FFN for Conformer Macaron structure.
+
+    LayerNorm -> Linear -> SiLU -> Dropout -> Linear -> Dropout.
+    The 0.5 scaling is applied externally in ConformerBlock.
+    """
+
+    def __init__(self, d_model: int, d_ff: int, dropout: float):
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model)
+        self.linear1 = nn.Linear(d_model, d_ff)
+        self.linear2 = nn.Linear(d_ff, d_model)
+        self.activation = nn.SiLU()
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.norm(x)
+        x = self.linear1(x)
+        x = self.activation(x)
+        x = self.dropout1(x)
+        x = self.linear2(x)
+        x = self.dropout2(x)
+        return x
+
+
+class ConformerConvModule(nn.Module):
+    """Conformer convolution module.
+
+    LayerNorm -> Pointwise(d, 2d) -> GLU -> DepthwiseConv1d -> BatchNorm -> SiLU
+    -> Pointwise(d, d) -> Dropout.
+    """
+
+    def __init__(self, d_model: int, kernel_size: int = 31, dropout: float = 0.0):
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model)
+        self.pointwise1 = nn.Conv1d(d_model, 2 * d_model, kernel_size=1)
+        self.depthwise = nn.Conv1d(
+            d_model, d_model, kernel_size=kernel_size,
+            padding=kernel_size // 2, groups=d_model,
+        )
+        self.batch_norm = nn.BatchNorm1d(d_model)
+        self.activation = nn.SiLU()
+        self.pointwise2 = nn.Conv1d(d_model, d_model, kernel_size=1)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self, x: torch.Tensor, padding_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """x: (batch, seq_len, d_model), padding_mask: (batch, seq_len) True=ignore."""
+        x = self.norm(x)
+        # (B, T, D) -> (B, D, T) for Conv1d
+        x = x.transpose(1, 2)
+
+        # Zero out padded positions before convolution
+        if padding_mask is not None:
+            x = x.masked_fill(padding_mask.unsqueeze(1), 0.0)
+
+        x = self.pointwise1(x)  # (B, 2D, T)
+        x = F.glu(x, dim=1)  # (B, D, T)
+        x = self.depthwise(x)  # (B, D, T)
+
+        # Zero out padded positions after depthwise conv
+        if padding_mask is not None:
+            x = x.masked_fill(padding_mask.unsqueeze(1), 0.0)
+
+        x = self.batch_norm(x)
+        x = self.activation(x)
+        x = self.pointwise2(x)  # (B, D, T)
+        x = self.dropout(x)
+
+        # Final mask to ensure padded positions are zero
+        if padding_mask is not None:
+            x = x.masked_fill(padding_mask.unsqueeze(1), 0.0)
+
+        # Back to (B, T, D)
+        return x.transpose(1, 2)
+
+
+class ConformerBlock(nn.Module):
+    """Conformer block: FFN/2 + Self-Attention + ConvModule + FFN/2 + LayerNorm.
+
+    Forward signature matches RoPEEncoderLayer for drop-in use in AudioEncoder.
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int,
+        kernel_size: int,
+        dropout: float,
+    ):
+        super().__init__()
+        self.ffn1 = ConformerFeedForward(d_model, dim_feedforward, dropout)
+        self.self_attn = RoPEMultiHeadAttention(d_model, nhead, dropout)
+        self.attn_norm = nn.LayerNorm(d_model)
+        self.attn_dropout = nn.Dropout(dropout)
+        self.conv_module = ConformerConvModule(d_model, kernel_size, dropout)
+        self.ffn2 = ConformerFeedForward(d_model, dim_feedforward, dropout)
+        self.final_norm = nn.LayerNorm(d_model)
+
+    def forward(
+        self,
+        src: torch.Tensor,
+        rope_cos: torch.Tensor | None = None,
+        rope_sin: torch.Tensor | None = None,
+        src_key_padding_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        # First half-step FFN
+        x = src + 0.5 * self.ffn1(src)
+
+        # Self-attention with RoPE
+        attn_in = self.attn_norm(x)
+        attn_out = self.self_attn(
+            attn_in, attn_in, attn_in,
+            rope_cos=rope_cos, rope_sin=rope_sin,
+            key_padding_mask=src_key_padding_mask,
+        )
+        x = x + self.attn_dropout(attn_out)
+
+        # Convolution module
+        x = x + self.conv_module(x, padding_mask=src_key_padding_mask)
+
+        # Second half-step FFN
+        x = x + 0.5 * self.ffn2(x)
+
+        # Final layer norm
+        return self.final_norm(x)
+
+
 class RoPEEncoderLayer(nn.Module):
     """Transformer encoder layer with RoPE self-attention."""
 
@@ -238,10 +372,32 @@ class AudioEncoder(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.use_rope = config.use_rope
+        self.use_conformer = config.use_conformer
         input_dim = config.n_mels + (1 if config.use_onset_features else 0)
         self.input_proj = nn.Linear(input_dim, config.encoder_dim)
 
-        if config.use_rope:
+        if config.use_conformer:
+            # Conformer encoder (supports both RoPE and sinusoidal PE)
+            if config.use_rope:
+                self.rope = RotaryPositionalEncoding(
+                    config.encoder_dim // config.encoder_heads,
+                    max_len=config.max_audio_len,
+                )
+            else:
+                self.pos_enc = SinusoidalPositionalEncoding(
+                    config.encoder_dim, max_len=config.max_audio_len,
+                    dropout=config.dropout,
+                )
+            self.dropout = nn.Dropout(config.dropout)
+            self.layers = nn.ModuleList([
+                ConformerBlock(
+                    config.encoder_dim, config.encoder_heads,
+                    config.encoder_ff_dim, config.conformer_kernel_size,
+                    config.dropout,
+                )
+                for _ in range(config.encoder_layers)
+            ])
+        elif config.use_rope:
             self.rope = RotaryPositionalEncoding(
                 config.encoder_dim // config.encoder_heads,
                 max_len=config.max_audio_len,
@@ -288,7 +444,16 @@ class AudioEncoder(nn.Module):
 
         padding_mask = ~mel_mask if mel_mask is not None else None
 
-        if self.use_rope:
+        if self.use_conformer:
+            if self.use_rope:
+                x = self.dropout(x)
+                cos, sin = self.rope(x.size(1), x.device)
+            else:
+                x = self.pos_enc(x)
+                cos, sin = None, None
+            for layer in self.layers:
+                x = layer(x, cos, sin, src_key_padding_mask=padding_mask)
+        elif self.use_rope:
             x = self.dropout(x)
             cos, sin = self.rope(x.size(1), x.device)
             for layer in self.layers:

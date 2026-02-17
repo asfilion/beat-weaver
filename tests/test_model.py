@@ -8,6 +8,8 @@ from beat_weaver.model.config import ModelConfig
 from beat_weaver.model.transformer import (
     AudioEncoder,
     BeatWeaverModel,
+    ConformerBlock,
+    ConformerConvModule,
     RotaryPositionalEncoding,
     SinusoidalPositionalEncoding,
     TokenDecoder,
@@ -240,6 +242,170 @@ class TestOnsetFeatureInput:
         mel_mask = torch.ones(2, 50, dtype=torch.bool)
         out = encoder(mel, mel_mask)
         assert out.shape == (2, 50, config.encoder_dim)
+
+
+class TestConformer:
+    @pytest.fixture
+    def conformer_config(self):
+        return ModelConfig(
+            vocab_size=291,
+            max_seq_len=128,
+            n_mels=80,
+            encoder_layers=2,
+            encoder_dim=64,
+            encoder_heads=4,
+            encoder_ff_dim=128,
+            decoder_layers=2,
+            decoder_dim=64,
+            decoder_heads=4,
+            decoder_ff_dim=128,
+            dropout=0.0,
+            use_rope=True,
+            use_conformer=True,
+            conformer_kernel_size=15,
+        )
+
+    def test_conformer_output_shape(self, conformer_config):
+        """Conformer encoder produces correct output shape."""
+        encoder = AudioEncoder(conformer_config)
+        mel = torch.randn(2, 80, 50)
+        mel_mask = torch.ones(2, 50, dtype=torch.bool)
+        out = encoder(mel, mel_mask)
+        assert out.shape == (2, 50, conformer_config.encoder_dim)
+
+    def test_conformer_no_mask(self, conformer_config):
+        """Conformer encoder works without padding mask."""
+        encoder = AudioEncoder(conformer_config)
+        mel = torch.randn(2, 80, 50)
+        out = encoder(mel)
+        assert out.shape == (2, 50, conformer_config.encoder_dim)
+
+    def test_conformer_with_padding(self, conformer_config):
+        """Conformer encoder handles variable-length input with padding."""
+        encoder = AudioEncoder(conformer_config)
+        mel = torch.randn(2, 80, 50)
+        mel_mask = torch.ones(2, 50, dtype=torch.bool)
+        mel_mask[1, 30:] = False  # Second sample is shorter
+        out = encoder(mel, mel_mask)
+        assert out.shape == (2, 50, conformer_config.encoder_dim)
+
+    def test_conformer_sinusoidal_pe(self):
+        """Conformer encoder works with sinusoidal PE (no RoPE)."""
+        config = ModelConfig(
+            vocab_size=291,
+            max_seq_len=128,
+            n_mels=80,
+            encoder_layers=2,
+            encoder_dim=64,
+            encoder_heads=4,
+            encoder_ff_dim=128,
+            decoder_layers=2,
+            decoder_dim=64,
+            decoder_heads=4,
+            decoder_ff_dim=128,
+            dropout=0.0,
+            use_rope=False,
+            use_conformer=True,
+            conformer_kernel_size=15,
+        )
+        encoder = AudioEncoder(config)
+        mel = torch.randn(2, 80, 50)
+        mel_mask = torch.ones(2, 50, dtype=torch.bool)
+        out = encoder(mel, mel_mask)
+        assert out.shape == (2, 50, config.encoder_dim)
+
+    def test_conformer_full_model_backward(self, conformer_config):
+        """Gradients flow through entire Conformer-based model."""
+        model = BeatWeaverModel(conformer_config)
+        mel = torch.randn(2, 80, 50)
+        tokens = torch.randint(0, 291, (2, 20))
+        target = torch.randint(0, 291, (2, 20))
+
+        logits = model(mel, tokens)
+        loss = torch.nn.functional.cross_entropy(
+            logits.reshape(-1, 291), target.reshape(-1),
+        )
+        loss.backward()
+
+        # Check encoder has gradients
+        has_grad = False
+        for param in model.encoder.parameters():
+            if param.requires_grad and param.grad is not None:
+                has_grad = True
+                break
+        assert has_grad, "No gradients in Conformer encoder"
+
+        # Check decoder has gradients
+        has_grad = False
+        for param in model.decoder.parameters():
+            if param.requires_grad and param.grad is not None:
+                has_grad = True
+                break
+        assert has_grad, "No gradients in decoder with Conformer encoder"
+
+    def test_conformer_onset_features(self):
+        """Conformer encoder works with onset features (81-channel input)."""
+        config = ModelConfig(
+            vocab_size=291,
+            max_seq_len=128,
+            n_mels=80,
+            encoder_layers=1,
+            encoder_dim=64,
+            encoder_heads=4,
+            encoder_ff_dim=128,
+            decoder_layers=1,
+            decoder_dim=64,
+            decoder_heads=4,
+            decoder_ff_dim=128,
+            dropout=0.0,
+            use_onset_features=True,
+            use_conformer=True,
+            conformer_kernel_size=15,
+        )
+        encoder = AudioEncoder(config)
+        mel = torch.randn(2, 81, 50)  # 80 mel + 1 onset
+        mel_mask = torch.ones(2, 50, dtype=torch.bool)
+        out = encoder(mel, mel_mask)
+        assert out.shape == (2, 50, config.encoder_dim)
+
+    def test_conformer_conv_module_shape(self):
+        """ConformerConvModule preserves input shape."""
+        conv_mod = ConformerConvModule(d_model=64, kernel_size=15, dropout=0.0)
+        x = torch.randn(2, 50, 64)
+        out = conv_mod(x)
+        assert out.shape == (2, 50, 64)
+
+    def test_conformer_conv_padded_zeros(self):
+        """Padded positions are zeroed in ConformerConvModule output."""
+        conv_mod = ConformerConvModule(d_model=64, kernel_size=15, dropout=0.0)
+        conv_mod.eval()
+        x = torch.randn(1, 20, 64)
+        mask = torch.zeros(1, 20, dtype=torch.bool)
+        mask[0, 15:] = True  # Last 5 positions are padding
+        out = conv_mod(x, padding_mask=mask)
+        assert torch.all(out[0, 15:] == 0.0)
+
+    def test_conformer_param_count(self, conformer_config):
+        """Conformer model has more params than standard transformer."""
+        conformer_model = BeatWeaverModel(conformer_config)
+        std_config = ModelConfig(
+            vocab_size=291,
+            max_seq_len=128,
+            n_mels=80,
+            encoder_layers=2,
+            encoder_dim=64,
+            encoder_heads=4,
+            encoder_ff_dim=128,
+            decoder_layers=2,
+            decoder_dim=64,
+            decoder_heads=4,
+            decoder_ff_dim=128,
+            dropout=0.0,
+            use_rope=True,
+            use_conformer=False,
+        )
+        std_model = BeatWeaverModel(std_config)
+        assert conformer_model.count_parameters() > std_model.count_parameters()
 
 
 class TestMediumConfig:

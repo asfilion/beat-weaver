@@ -60,6 +60,10 @@ class ModelConfig:
     # Positional encoding
     use_rope: bool = True  # Use RoPE instead of sinusoidal PE
 
+    # Conformer encoder
+    use_conformer: bool = True  # Conformer blocks instead of Transformer encoder
+    conformer_kernel_size: int = 31  # Depthwise conv kernel size
+
     # Auxiliary losses
     density_loss_weight: float = 0.1
     color_balance_weight: float = 0.0  # Weight for color balance auxiliary loss

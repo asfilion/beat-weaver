@@ -28,6 +28,8 @@
   "color_balance_weight": 0.1,
   "use_onset_features": true,
   "use_rope": true,
+  "use_conformer": true,
+  "conformer_kernel_size": 31,
   "min_difficulty": "Expert",
   "characteristics": ["Standard"],
   "min_bpm": 50.0,
