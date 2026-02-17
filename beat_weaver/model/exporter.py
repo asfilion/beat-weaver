@@ -125,11 +125,11 @@ def export_map(
 
     # Write Info.dat
     info = _build_info_dat(song_name, bpm, difficulty, audio_filename)
-    (output_dir / "Info.dat").write_text(json.dumps(info, indent=2))
+    (output_dir / "Info.dat").write_text(json.dumps(info, indent=2), encoding="utf-8")
 
     # Write difficulty file
     diff_dat = _build_difficulty_dat(notes)
-    (output_dir / f"{difficulty}.dat").write_text(json.dumps(diff_dat, indent=2))
+    (output_dir / f"{difficulty}.dat").write_text(json.dumps(diff_dat, indent=2), encoding="utf-8")
 
     return output_dir
 
@@ -167,9 +167,9 @@ def export_notes(
     shutil.copy2(audio_path, dest_audio)
 
     info = _build_info_dat(song_name, bpm, difficulty, audio_filename)
-    (output_dir / "Info.dat").write_text(json.dumps(info, indent=2))
+    (output_dir / "Info.dat").write_text(json.dumps(info, indent=2), encoding="utf-8")
 
     diff_dat = _build_difficulty_dat(notes)
-    (output_dir / f"{difficulty}.dat").write_text(json.dumps(diff_dat, indent=2))
+    (output_dir / f"{difficulty}.dat").write_text(json.dumps(diff_dat, indent=2), encoding="utf-8")
 
     return output_dir

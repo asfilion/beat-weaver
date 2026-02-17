@@ -18,7 +18,7 @@ class ProcessingCache:
     @staticmethod
     def _load(path: Path) -> dict:
         if path.exists():
-            return json.loads(path.read_text())
+            return json.loads(path.read_text(encoding="utf-8"))
         return {}
 
     def is_downloaded(self, beatsaver_id: str) -> bool:
@@ -34,6 +34,6 @@ class ProcessingCache:
         self.processed.add(content_hash)
 
     def save(self) -> None:
-        self._downloaded_path.write_text(json.dumps(self.downloaded, indent=2))
+        self._downloaded_path.write_text(json.dumps(self.downloaded, indent=2), encoding="utf-8")
         processed_dict = {h: True for h in self.processed}
-        self._processed_path.write_text(json.dumps(processed_dict, indent=2))
+        self._processed_path.write_text(json.dumps(processed_dict, indent=2), encoding="utf-8")

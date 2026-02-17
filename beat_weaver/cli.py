@@ -253,7 +253,7 @@ def cmd_evaluate(args: argparse.Namespace) -> None:
         results.append(metrics)
 
     output_path = Path(args.output) if args.output else Path("evaluation_results.json")
-    output_path.write_text(_json.dumps(results, indent=2))
+    output_path.write_text(_json.dumps(results, indent=2), encoding="utf-8")
     print(f"Evaluated {len(results)} maps. Results: {output_path}")
 
 

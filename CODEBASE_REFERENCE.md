@@ -64,7 +64,8 @@ tests/
 configs/
 ├── small.json                         # Small model config (1M params, batch_size=32, 2 layers, dim=128)
 ├── medium.json                        # Medium model config (6.5M params, 4L/256d, seq_len=4096, Expert+, onset features)
-└── medium_conformer.json              # Medium Conformer config (9.4M params, Conformer encoder, LR=3e-5)
+├── medium_conformer.json              # Medium Conformer config (9.4M params, Conformer encoder, LR=3e-5)
+└── large_conformer.json               # Large Conformer config (62M params, 6L/512d, Conformer, 24GB+ VRAM)
 ```
 
 ## Core Dataclasses (`beat_weaver/schemas/normalized.py`)

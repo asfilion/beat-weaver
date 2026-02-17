@@ -84,7 +84,7 @@ def warm_mel_cache(
     expected_version = _cache_version_key(config)
     needs_clear = False
     if version_file.exists():
-        current_version = version_file.read_text().strip()
+        current_version = version_file.read_text(encoding="utf-8").strip()
         if current_version != expected_version:
             needs_clear = True
     else:
@@ -100,13 +100,13 @@ def warm_mel_cache(
         )
         for npy_file in cache_dir.glob("*.npy"):
             npy_file.unlink()
-    version_file.write_text(expected_version)
+    version_file.write_text(expected_version, encoding="utf-8")
 
     manifest = load_manifest(audio_manifest_path)
 
     # Load BPMs from metadata
     meta_path = processed_dir / "metadata.json"
-    with open(meta_path) as f:
+    with open(meta_path, encoding="utf-8") as f:
         raw_meta = json.load(f)
     bpm_lookup: dict[str, float] = {}
     if isinstance(raw_meta, list):
@@ -205,7 +205,7 @@ class BeatSaberDataset(Dataset):
 
         # Load metadata (writer produces a list; convert to dict keyed by hash)
         meta_path = self.processed_dir / "metadata.json"
-        with open(meta_path) as f:
+        with open(meta_path, encoding="utf-8") as f:
             raw_meta = json.load(f)
         if isinstance(raw_meta, list):
             self.metadata: dict[str, dict] = {m["hash"]: m for m in raw_meta}

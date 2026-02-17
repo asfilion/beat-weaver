@@ -88,7 +88,7 @@ Audio (mel spectrogram + onset) → [Audio Encoder] → [Token Decoder] → Toke
 - **Audio features:** Log-mel spectrogram (80 bins) with optional onset strength channel
 - **Training:** SpecAugment, color balance loss, dataset filtering by difficulty/characteristic/BPM
 - **Inference:** Autoregressive generation with grammar constraints ensuring valid map structure
-- **Configs:** Small (1M params), medium (6.5M params), medium conformer (9.4M params, 8GB VRAM), default (44.5M params)
+- **Configs:** Small (1M params), medium (6.5M params), medium conformer (9.4M params, 8GB VRAM), large conformer (62M params, 24GB+ VRAM)
 
 See [RESEARCH.md](RESEARCH.md) for research details and [plans/](plans/) for implementation plans.
 

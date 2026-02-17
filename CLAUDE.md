@@ -61,7 +61,7 @@ Install: `pip install -e .` (core) or `pip install -e ".[ml]"` (with ML dependen
 
 **Output format:** `data/processed/notes_NNNN.parquet` (one row group per song, split at 1 GB) with columns: song_hash, source, difficulty, characteristic, bpm, beat, time_seconds, x, y, color, cut_direction, angle_offset. Reader (`read_notes_parquet`) handles both multi-file and legacy single-file layouts.
 
-**Model configs:** `configs/small.json` (1M params, batch_size=32) for fast iteration. `configs/medium.json` (6.5M params, 4L/256d, seq_len=4096, Expert+ only, onset features) for standard transformer training. `configs/medium_conformer.json` (9.4M params, Conformer encoder, LR=3e-5) for Conformer training on 8GB VRAM. Default config (44.5M params) for full training.
+**Model configs:** `configs/small.json` (1M params, batch_size=32) for fast iteration. `configs/medium.json` (6.5M params, 4L/256d) for standard transformer. `configs/medium_conformer.json` (9.4M params, Conformer, 8GB VRAM). `configs/large_conformer.json` (62M params, 6L/512d, Conformer, 24GB+ VRAM) for full training.
 
 **Tests:** `python -m pytest tests/ -v` (178 tests; ML tests skipped without `.[ml]` deps)
 
@@ -71,7 +71,7 @@ Install: `pip install -e .` (core) or `pip install -e ".[ml]"` (with ML dependen
 
 See [RESEARCH.md](RESEARCH.md) for research details, [plans/002-ml-model.md](plans/002-ml-model.md) for implementation plan.
 
-- **Architecture:** Encoder-decoder transformer (44.5M default, 9.4M medium conformer, 6.5M medium standard, 1M small)
+- **Architecture:** Encoder-decoder transformer (62M large conformer, 9.4M medium conformer, 6.5M medium standard, 1M small)
 - **Audio encoder:** Conformer (default) or standard Transformer. Conformer blocks use FFN/2 + Self-Attention + DepthwiseConv + FFN/2 + LayerNorm (Gulati et al., 2020). Config: `use_conformer=True` (default), `conformer_kernel_size=31`.
 - **Audio input:** Log-mel spectrogram (80 bins, sr=22050, hop=512), beat-aligned to 1/16th note grid. Optional onset strength channel (+1 bin).
 - **Positional encoding:** RoPE (default) or sinusoidal (config.use_rope=False). RoPE applied to self-attention Q/K only (not cross-attention).

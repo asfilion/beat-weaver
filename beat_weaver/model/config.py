@@ -72,12 +72,12 @@ class ModelConfig:
         """Save config to JSON file."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(asdict(self), indent=2))
+        path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> ModelConfig:
         """Load config from JSON file."""
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
         # Only pass known fields to handle forward/backward compat
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})

@@ -245,9 +245,9 @@ def save_manifest(manifest: dict[str, str], path: Path) -> None:
     """Save audio manifest to JSON."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, indent=2))
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 def load_manifest(path: Path) -> dict[str, str]:
     """Load audio manifest from JSON."""
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding="utf-8"))

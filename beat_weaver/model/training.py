@@ -213,7 +213,7 @@ class Trainer:
             "global_step": self.global_step,
             "best_val_loss": self.best_val_loss,
         }
-        (ckpt_dir / "training_state.json").write_text(json.dumps(state, indent=2))
+        (ckpt_dir / "training_state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
         return ckpt_dir
 
     def load_checkpoint(self, ckpt_dir: Path) -> None:
@@ -236,7 +236,7 @@ class Trainer:
             # No scaler.pt — use conservative scale=1.0 to avoid overflow
             self.scaler = torch.amp.GradScaler(init_scale=1.0, growth_interval=1000)
             logger.info("No scaler.pt found; using conservative init_scale=1.0")
-        state = json.loads((ckpt_dir / "training_state.json").read_text())
+        state = json.loads((ckpt_dir / "training_state.json").read_text(encoding="utf-8"))
         self.epoch = state["epoch"]
         self.global_step = state["global_step"]
         self.best_val_loss = state["best_val_loss"]
@@ -394,7 +394,7 @@ def train(
         "model_parameters": model.count_parameters(),
     }
     summary_path = output_dir / "training_summary.json"
-    summary_path.write_text(json.dumps(summary, indent=2))
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     logger.info(
         "Training complete: %d epochs in %.0fs (avg %.1fs/epoch, %.1f samples/s)",
         epochs_completed, total_time, avg_epoch,
